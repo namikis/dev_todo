@@ -8,12 +8,21 @@ import { z } from "zod";
 const DATA_DIR = path.join(process.cwd(), "data");
 const DATA_FILE = path.join(DATA_DIR, "todos.json");
 
+const SubtaskSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  completed: z.boolean(),
+});
+
 export const TodoSchema = z.object({
   id: z.string(),
   title: z.string(),
   completed: z.boolean(),
   createdAt: z.string(),
   completedAt: z.string().nullable(),
+  dueDate: z.string().nullable().optional().default(null),
+  memo: z.string().nullable().optional().default(null),
+  subtasks: z.array(SubtaskSchema).optional().default([]),
 });
 
 const TodosSchema = z.array(TodoSchema);
@@ -42,10 +51,15 @@ async function saveTodos(todos) {
 
 export function formatTodo(todo) {
   const status = todo.completed ? "x" : " ";
-  return `- [${status}] ${todo.title} (${todo.id})`;
+  const due = todo.dueDate ? ` [期限: ${todo.dueDate}]` : "";
+  const memo = todo.memo ? ` memo: ${todo.memo.slice(0, 40)}` : "";
+  const subs = (todo.subtasks ?? []).length;
+  const subsDone = (todo.subtasks ?? []).filter((s) => s.completed).length;
+  const subsInfo = subs > 0 ? ` (subtasks: ${subsDone}/${subs})` : "";
+  return `- [${status}] ${todo.title}${due}${memo}${subsInfo} (${todo.id})`;
 }
 
-export async function addTodo(title) {
+export async function addTodo(title, { dueDate = null, memo = null } = {}) {
   const todos = await loadTodos();
   const now = new Date().toISOString();
   const todo = {
@@ -54,6 +68,9 @@ export async function addTodo(title) {
     completed: false,
     createdAt: now,
     completedAt: null,
+    dueDate: dueDate || null,
+    memo: memo || null,
+    subtasks: [],
   };
   todos.push(todo);
   await saveTodos(todos);
@@ -73,6 +90,19 @@ export async function listTodos({ status = "all", limit = 50 } = {}) {
     return true;
   });
   return filtered.slice(0, limit);
+}
+
+export async function updateTodo(id, updates) {
+  const todos = await loadTodos();
+  const idx = todos.findIndex((t) => t.id === id);
+  if (idx === -1) return null;
+  const allowed = {};
+  if ("title" in updates && updates.title != null) allowed.title = updates.title;
+  if ("dueDate" in updates) allowed.dueDate = updates.dueDate || null;
+  if ("memo" in updates) allowed.memo = updates.memo || null;
+  todos[idx] = { ...todos[idx], ...allowed };
+  await saveTodos(todos);
+  return todos[idx];
 }
 
 export async function setCompleted(id, completed = true) {
@@ -107,3 +137,38 @@ export async function clearCompleted() {
   return removed;
 }
 
+// --- Subtask operations ---
+
+export async function addSubtask(todoId, title) {
+  const todos = await loadTodos();
+  const idx = todos.findIndex((t) => t.id === todoId);
+  if (idx === -1) return null;
+  const subtask = { id: randomUUID(), title, completed: false };
+  todos[idx].subtasks = [...(todos[idx].subtasks ?? []), subtask];
+  await saveTodos(todos);
+  return { todo: todos[idx], subtask };
+}
+
+export async function toggleSubtask(todoId, subtaskId, completed) {
+  const todos = await loadTodos();
+  const idx = todos.findIndex((t) => t.id === todoId);
+  if (idx === -1) return null;
+  const subs = todos[idx].subtasks ?? [];
+  const si = subs.findIndex((s) => s.id === subtaskId);
+  if (si === -1) return null;
+  subs[si] = { ...subs[si], completed };
+  todos[idx].subtasks = subs;
+  await saveTodos(todos);
+  return { todo: todos[idx], subtask: subs[si] };
+}
+
+export async function deleteSubtask(todoId, subtaskId) {
+  const todos = await loadTodos();
+  const idx = todos.findIndex((t) => t.id === todoId);
+  if (idx === -1) return null;
+  const before = (todos[idx].subtasks ?? []).length;
+  todos[idx].subtasks = (todos[idx].subtasks ?? []).filter((s) => s.id !== subtaskId);
+  if (todos[idx].subtasks.length === before) return null;
+  await saveTodos(todos);
+  return todos[idx];
+}
