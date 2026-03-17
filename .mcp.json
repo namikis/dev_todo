@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "mcp-todo": {
+      "command": "/Users/tairyu/.nvm/versions/node/v20.20.1/bin/node",
+      "args": ["./mcp-todo-server.js"],
+      "cwd": "/Users/tairyu/Desktop/program/dev_todo"
+    }
+  }
+}
