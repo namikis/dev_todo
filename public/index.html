@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>TODO</title>
+    <title>DEV TODO</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <div class="container">
       <header class="header">
         <div>
-          <h1>TODO</h1>
-          <p class="muted">ローカル保存（<code>data/todos.json</code>）</p>
+          <h1>DEV TODO</h1>
+          <p class="muted">開発タスク管理（<code>data/todos.json</code>）</p>
         </div>
         <div class="header-actions">
           <label class="select">
@@ -27,9 +27,12 @@
       </header>
 
       <section class="card">
-        <form id="addForm" class="row">
-          <input id="title" class="input" type="text" placeholder="例: 牛乳を買う" required />
-          <button class="button primary" type="submit">追加</button>
+        <form id="addForm" class="add-form">
+          <div class="row">
+            <input id="title" class="input" type="text" placeholder="タスク名" required />
+            <input id="dueDate" class="input date-input" type="date" />
+            <button class="button primary" type="submit">追加</button>
+          </div>
         </form>
         <div id="error" class="error" hidden></div>
       </section>
@@ -46,4 +49,3 @@
     <script type="module" src="/app.js"></script>
   </body>
 </html>
-

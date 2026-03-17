@@ -5,16 +5,37 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
-import { addTodo, clearCompleted, deleteTodo, listTodos, setCompleted } from "./todo-store.js";
+import {
+  addTodo,
+  clearCompleted,
+  deleteTodo,
+  listTodos,
+  setCompleted,
+  updateTodo,
+  addSubtask,
+  toggleSubtask,
+  deleteSubtask,
+} from "./todo-store.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PUBLIC_DIR = path.join(__dirname, "public");
 
-const AddSchema = z.object({ title: z.string().min(1) });
-const PatchSchema = z.object({ completed: z.boolean() });
+const AddSchema = z.object({
+  title: z.string().min(1),
+  dueDate: z.string().nullable().optional(),
+  memo: z.string().nullable().optional(),
+});
+const PatchSchema = z.object({
+  completed: z.boolean().optional(),
+  title: z.string().min(1).optional(),
+  dueDate: z.string().nullable().optional(),
+  memo: z.string().nullable().optional(),
+});
 const ClearSchema = z.object({ confirm: z.boolean().optional().default(false) });
+const SubtaskAddSchema = z.object({ title: z.string().min(1) });
+const SubtaskPatchSchema = z.object({ completed: z.boolean() });
 
 function json(res, status, body) {
   const data = JSON.stringify(body);
@@ -83,6 +104,7 @@ async function serveStatic(req, res, url) {
 async function handleApi(req, res, url) {
   const { pathname, searchParams } = url;
 
+  // GET /api/todos
   if (req.method === "GET" && pathname === "/api/todos") {
     const status = searchParams.get("status") ?? "all";
     const limit = Number(searchParams.get("limit") ?? "50");
@@ -93,12 +115,17 @@ async function handleApi(req, res, url) {
     return json(res, 200, { todos });
   }
 
+  // POST /api/todos
   if (req.method === "POST" && pathname === "/api/todos") {
     const body = AddSchema.parse(await readJson(req));
-    const todo = await addTodo(body.title);
+    const todo = await addTodo(body.title, {
+      dueDate: body.dueDate ?? null,
+      memo: body.memo ?? null,
+    });
     return json(res, 200, { todo });
   }
 
+  // POST /api/todos/clear-completed
   if (req.method === "POST" && pathname === "/api/todos/clear-completed") {
     const body = ClearSchema.parse(await readJson(req));
     if (!body.confirm) return text(res, 400, "confirm required");
@@ -106,11 +133,54 @@ async function handleApi(req, res, url) {
     return json(res, 200, { removed });
   }
 
+  // Subtask routes: /api/todos/:id/subtasks[/:subtaskId]
+  const subMatch = pathname.match(/^\/api\/todos\/([^/]+)\/subtasks(?:\/([^/]+))?$/);
+  if (subMatch) {
+    const todoId = decodeURIComponent(subMatch[1]);
+    const subtaskId = subMatch[2] ? decodeURIComponent(subMatch[2]) : null;
+
+    // POST /api/todos/:id/subtasks
+    if (req.method === "POST" && !subtaskId) {
+      const body = SubtaskAddSchema.parse(await readJson(req));
+      const result = await addSubtask(todoId, body.title);
+      if (!result) return text(res, 404, "todo not found");
+      return json(res, 200, { todo: result.todo, subtask: result.subtask });
+    }
+
+    // PATCH /api/todos/:id/subtasks/:subtaskId
+    if (req.method === "PATCH" && subtaskId) {
+      const body = SubtaskPatchSchema.parse(await readJson(req));
+      const result = await toggleSubtask(todoId, subtaskId, body.completed);
+      if (!result) return text(res, 404, "not found");
+      return json(res, 200, { todo: result.todo, subtask: result.subtask });
+    }
+
+    // DELETE /api/todos/:id/subtasks/:subtaskId
+    if (req.method === "DELETE" && subtaskId) {
+      const todo = await deleteSubtask(todoId, subtaskId);
+      if (!todo) return text(res, 404, "not found");
+      return json(res, 200, { todo });
+    }
+  }
+
+  // Single todo routes: /api/todos/:id
   const m = pathname.match(/^\/api\/todos\/([^/]+)$/);
   if (m && req.method === "PATCH") {
     const id = decodeURIComponent(m[1]);
     const body = PatchSchema.parse(await readJson(req));
-    const todo = await setCompleted(id, body.completed);
+    if ("completed" in body) {
+      const todo = await setCompleted(id, body.completed);
+      if (!todo) return text(res, 404, "not found");
+      // Also apply other updates if present
+      const rest = { ...body };
+      delete rest.completed;
+      if (Object.keys(rest).length > 0) {
+        const updated = await updateTodo(id, rest);
+        if (updated) return json(res, 200, { todo: updated });
+      }
+      return json(res, 200, { todo });
+    }
+    const todo = await updateTodo(id, body);
     if (!todo) return text(res, 404, "not found");
     return json(res, 200, { todo });
   }
@@ -141,4 +211,3 @@ server.listen(port, "127.0.0.1", () => {
   // eslint-disable-next-line no-console
   console.log(`GUI running on http://127.0.0.1:${port}`);
 });
-

@@ -104,6 +104,11 @@ h1 {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 20%, transparent);
 }
 
+.date-input {
+  width: auto;
+  min-width: 150px;
+}
+
 .button {
   border-radius: 12px;
   border: 1px solid var(--border);
@@ -111,6 +116,7 @@ h1 {
   color: var(--text);
   padding: 10px 12px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .button:hover {
@@ -125,6 +131,12 @@ h1 {
 .button.danger {
   background: color-mix(in srgb, var(--danger) 15%, transparent);
   border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+}
+
+.button.small {
+  padding: 4px 8px;
+  font-size: 12px;
+  border-radius: 8px;
 }
 
 .header-actions {
@@ -155,25 +167,40 @@ select {
   gap: 8px;
 }
 
+/* --- Todo item --- */
 .todo {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.todo-row {
   display: grid;
   grid-template-columns: 20px 1fr auto;
   gap: 10px;
   align-items: center;
-  padding: 10px 10px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
 }
 
 .todo-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.todo-title:hover {
+  color: var(--primary);
 }
 
 .todo.done .todo-title {
   text-decoration: line-through;
   color: var(--muted);
+}
+
+.todo-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 
 .pill {
@@ -184,6 +211,116 @@ select {
   color: var(--muted);
 }
 
+.pill.due {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  color: var(--primary);
+}
+
+.pill.overdue {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+  color: var(--danger);
+}
+
+/* --- Detail panel --- */
+.todo-detail {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 10px;
+}
+
+.detail-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.detail-label {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 60px;
+}
+
+.detail-input {
+  flex: 1;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  padding: 6px 8px;
+  font-size: 13px;
+  outline: none;
+}
+
+.detail-input:focus {
+  border-color: color-mix(in srgb, var(--primary) 65%, var(--border));
+}
+
+textarea.detail-input {
+  min-height: 60px;
+  resize: vertical;
+  font-family: inherit;
+}
+
+/* --- Subtasks --- */
+.subtask-section {
+  margin-top: 6px;
+}
+
+.subtask-header {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.subtask-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.subtask-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.subtask-item:hover {
+  background: color-mix(in srgb, var(--border) 40%, transparent);
+}
+
+.subtask-item.done span {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.subtask-item span {
+  flex: 1;
+}
+
+.subtask-add {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.subtask-add input {
+  flex: 1;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  padding: 4px 8px;
+  font-size: 13px;
+  outline: none;
+}
+
 .error {
   margin-top: 10px;
   padding: 10px 12px;
@@ -191,4 +328,3 @@ select {
   border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border));
   background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
-
