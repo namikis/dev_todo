@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>TODO</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header class="header">
+        <div>
+          <h1>TODO</h1>
+          <p class="muted">ローカル保存（<code>data/todos.json</code>）</p>
+        </div>
+        <div class="header-actions">
+          <label class="select">
+            <span class="muted">表示</span>
+            <select id="filter">
+              <option value="all">すべて</option>
+              <option value="open">未完了</option>
+              <option value="done">完了</option>
+            </select>
+          </label>
+          <button id="clearCompleted" class="button danger">完了を削除</button>
+        </div>
+      </header>
+
+      <section class="card">
+        <form id="addForm" class="row">
+          <input id="title" class="input" type="text" placeholder="例: 牛乳を買う" required />
+          <button class="button primary" type="submit">追加</button>
+        </form>
+        <div id="error" class="error" hidden></div>
+      </section>
+
+      <section class="card">
+        <div class="row space-between">
+          <div class="muted" id="summary">-</div>
+          <button id="refresh" class="button">更新</button>
+        </div>
+        <ul id="list" class="list"></ul>
+      </section>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
+
