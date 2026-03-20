@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "buildCommand": "",
+  "outputDirectory": "public",
+  "functions": {
+    "api/**/*.js": {
+      "runtime": "@vercel/node@3"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/todos/clear-completed", "destination": "/api/todos/clear-completed" },
+    { "source": "/api/todos/:id/request", "destination": "/api/todos/[id]/request" },
+    { "source": "/api/todos/:id/subtasks/:subtaskId", "destination": "/api/todos/[id]/subtasks/[subtaskId]" },
+    { "source": "/api/todos/:id/subtasks", "destination": "/api/todos/[id]/subtasks" },
+    { "source": "/api/todos/:id", "destination": "/api/todos/[id]" },
+    { "source": "/api/docs/:name", "destination": "/api/docs/[name]" }
+  ]
+}
