@@ -10,3 +10,4 @@ yarn-error.log*
 # Todo data
 data/todos.json
 
+.vercel

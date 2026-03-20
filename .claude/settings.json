@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/tairyu/.claude/projects/-Users-tairyu-Desktop-program-dev_todo/memory/**)"
+    ],
+    "additionalDirectories": [
+      "/Users/tairyu/.claude/projects/-Users-tairyu-Desktop-program-dev_todo/memory"
+    ]
+  },
+  "enabledMcpjsonServers": ["mcp-todo"]
+}
