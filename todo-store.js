@@ -1,12 +1,13 @@
+try { await import("dotenv/config"); } catch {}
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import path from "node:path";
-import process from "node:process";
 
+import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const DATA_FILE = path.join(DATA_DIR, "todos.json");
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY,
+);
 
 const SubtaskSchema = z.object({
   id: z.string(),
@@ -22,153 +23,195 @@ export const TodoSchema = z.object({
   completedAt: z.string().nullable(),
   dueDate: z.string().nullable().optional().default(null),
   memo: z.string().nullable().optional().default(null),
+  assignee: z.enum(["Claude", "Tairyu"]).nullable().optional().default(null),
+  type: z.enum(["research", "implement"]).nullable().optional().default(null),
+  project: z.string().nullable().optional().default(null),
   subtasks: z.array(SubtaskSchema).optional().default([]),
+  status: z.enum(["open", "requested", "running", "done", "error"]).default("open"),
+  result: z.string().nullable().optional().default(null),
+  reportUrl: z.string().nullable().optional().default(null),
+  prUrl: z.string().nullable().optional().default(null),
+  requestedAt: z.string().nullable().optional().default(null),
 });
 
-const TodosSchema = z.array(TodoSchema);
-
-async function readTodosUnsafe() {
-  const raw = await readFile(DATA_FILE, "utf8");
-  return JSON.parse(raw);
-}
-
-export async function loadTodos() {
-  try {
-    const parsed = await readTodosUnsafe();
-    return TodosSchema.parse(parsed);
-  } catch (err) {
-    if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") return [];
-    throw err;
-  }
-}
-
-async function saveTodos(todos) {
-  await mkdir(DATA_DIR, { recursive: true });
-  const tmp = `${DATA_FILE}.${Date.now()}.tmp`;
-  await writeFile(tmp, JSON.stringify(todos, null, 2) + "\n", "utf8");
-  await rename(tmp, DATA_FILE);
+function fromRow(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    completed: row.completed,
+    createdAt: row.created_at,
+    completedAt: row.completed_at ?? null,
+    dueDate: row.due_date ?? null,
+    memo: row.memo ?? null,
+    assignee: row.assignee ?? null,
+    type: row.type ?? null,
+    project: row.project ?? null,
+    subtasks: row.subtasks ?? [],
+    status: row.status ?? "open",
+    result: row.result ?? null,
+    reportUrl: row.report_url ?? null,
+    prUrl: row.pr_url ?? null,
+    requestedAt: row.requested_at ?? null,
+  };
 }
 
 export function formatTodo(todo) {
   const status = todo.completed ? "x" : " ";
   const due = todo.dueDate ? ` [期限: ${todo.dueDate}]` : "";
   const memo = todo.memo ? ` memo: ${todo.memo.slice(0, 40)}` : "";
+  const assignee = todo.assignee ? ` @${todo.assignee}` : "";
+  const project = todo.project ? ` [project: ${todo.project}]` : "";
   const subs = (todo.subtasks ?? []).length;
   const subsDone = (todo.subtasks ?? []).filter((s) => s.completed).length;
   const subsInfo = subs > 0 ? ` (subtasks: ${subsDone}/${subs})` : "";
-  return `- [${status}] ${todo.title}${due}${memo}${subsInfo} (${todo.id})`;
+  return `- [${status}] ${todo.title}${due}${assignee}${project}${memo}${subsInfo} (${todo.id})`;
 }
 
-export async function addTodo(title, { dueDate = null, memo = null } = {}) {
-  const todos = await loadTodos();
-  const now = new Date().toISOString();
-  const todo = {
-    id: randomUUID(),
-    title,
-    completed: false,
-    createdAt: now,
-    completedAt: null,
-    dueDate: dueDate || null,
-    memo: memo || null,
-    subtasks: [],
-  };
-  todos.push(todo);
-  await saveTodos(todos);
-  return todo;
+export async function loadTodos() {
+  const { data, error } = await supabase
+    .from("todos")
+    .select("*")
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map(fromRow);
+}
+
+export async function addTodo(title, { dueDate = null, memo = null, assignee = null, type = null, project = null } = {}) {
+  const { data, error } = await supabase
+    .from("todos")
+    .insert({ title, due_date: dueDate || null, memo: memo || null, assignee: assignee || null, type: type || null, project: project || null })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return fromRow(data);
 }
 
 export async function getTodo(id) {
-  const todos = await loadTodos();
-  return todos.find((t) => t.id === id) ?? null;
+  const { data, error } = await supabase.from("todos").select("*").eq("id", id).single();
+  if (error) {
+    if (error.code === "PGRST116") return null;
+    throw new Error(error.message);
+  }
+  return fromRow(data);
 }
 
 export async function listTodos({ status = "all", limit = 50 } = {}) {
-  const todos = await loadTodos();
-  const filtered = todos.filter((t) => {
-    if (status === "open") return !t.completed;
-    if (status === "done") return t.completed;
-    return true;
-  });
-  return filtered.slice(0, limit);
+  let query = supabase
+    .from("todos")
+    .select("*")
+    .order("due_date", { ascending: true, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (status === "open") query = query.eq("completed", false);
+  if (status === "done") query = query.eq("completed", true);
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return (data ?? []).map(fromRow);
 }
 
 export async function updateTodo(id, updates) {
-  const todos = await loadTodos();
-  const idx = todos.findIndex((t) => t.id === id);
-  if (idx === -1) return null;
-  const allowed = {};
-  if ("title" in updates && updates.title != null) allowed.title = updates.title;
-  if ("dueDate" in updates) allowed.dueDate = updates.dueDate || null;
-  if ("memo" in updates) allowed.memo = updates.memo || null;
-  todos[idx] = { ...todos[idx], ...allowed };
-  await saveTodos(todos);
-  return todos[idx];
+  const dbUpdates = {};
+  if ("title" in updates && updates.title != null) dbUpdates.title = updates.title;
+  if ("dueDate" in updates) dbUpdates.due_date = updates.dueDate || null;
+  if ("memo" in updates) dbUpdates.memo = updates.memo || null;
+  if ("assignee" in updates) dbUpdates.assignee = updates.assignee || null;
+  if ("type" in updates) dbUpdates.type = updates.type || null;
+  if ("project" in updates) dbUpdates.project = updates.project || null;
+  if (Object.keys(dbUpdates).length === 0) return await getTodo(id);
+  const { data, error } = await supabase.from("todos").update(dbUpdates).eq("id", id).select().single();
+  if (error) {
+    if (error.code === "PGRST116") return null;
+    throw new Error(error.message);
+  }
+  return fromRow(data);
 }
 
 export async function setCompleted(id, completed = true) {
-  const todos = await loadTodos();
-  const idx = todos.findIndex((t) => t.id === id);
-  if (idx === -1) return null;
   const now = new Date().toISOString();
-  const next = {
-    ...todos[idx],
-    completed,
-    completedAt: completed ? now : null,
-  };
-  todos[idx] = next;
-  await saveTodos(todos);
-  return next;
+  const { data, error } = await supabase
+    .from("todos")
+    .update({ completed, completed_at: completed ? now : null })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) {
+    if (error.code === "PGRST116") return null;
+    throw new Error(error.message);
+  }
+  return fromRow(data);
 }
 
 export async function deleteTodo(id) {
-  const todos = await loadTodos();
-  const before = todos.length;
-  const next = todos.filter((t) => t.id !== id);
-  if (next.length === before) return false;
-  await saveTodos(next);
-  return true;
+  const { error, count } = await supabase.from("todos").delete({ count: "exact" }).eq("id", id);
+  if (error) throw new Error(error.message);
+  return (count ?? 0) > 0;
 }
 
 export async function clearCompleted() {
-  const todos = await loadTodos();
-  const remaining = todos.filter((t) => !t.completed);
-  const removed = todos.length - remaining.length;
-  await saveTodos(remaining);
-  return removed;
+  const { error, count } = await supabase.from("todos").delete({ count: "exact" }).eq("completed", true);
+  if (error) throw new Error(error.message);
+  return count ?? 0;
 }
 
-// --- Subtask operations ---
+export async function requestTodo(id) {
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("todos")
+    .update({ status: "requested", requested_at: now })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) {
+    if (error.code === "PGRST116") return null;
+    throw new Error(error.message);
+  }
+  return fromRow(data);
+}
+
+// --- Subtask operations (stored as jsonb in todos.subtasks) ---
 
 export async function addSubtask(todoId, title) {
-  const todos = await loadTodos();
-  const idx = todos.findIndex((t) => t.id === todoId);
-  if (idx === -1) return null;
+  const todo = await getTodo(todoId);
+  if (!todo) return null;
   const subtask = { id: randomUUID(), title, completed: false };
-  todos[idx].subtasks = [...(todos[idx].subtasks ?? []), subtask];
-  await saveTodos(todos);
-  return { todo: todos[idx], subtask };
+  const subtasks = [...(todo.subtasks ?? []), subtask];
+  const { data, error } = await supabase.from("todos").update({ subtasks }).eq("id", todoId).select().single();
+  if (error) throw new Error(error.message);
+  return { todo: fromRow(data), subtask };
 }
 
 export async function toggleSubtask(todoId, subtaskId, completed) {
-  const todos = await loadTodos();
-  const idx = todos.findIndex((t) => t.id === todoId);
-  if (idx === -1) return null;
-  const subs = todos[idx].subtasks ?? [];
+  const todo = await getTodo(todoId);
+  if (!todo) return null;
+  const subs = [...(todo.subtasks ?? [])];
   const si = subs.findIndex((s) => s.id === subtaskId);
   if (si === -1) return null;
   subs[si] = { ...subs[si], completed };
-  todos[idx].subtasks = subs;
-  await saveTodos(todos);
-  return { todo: todos[idx], subtask: subs[si] };
+  const { data, error } = await supabase.from("todos").update({ subtasks: subs }).eq("id", todoId).select().single();
+  if (error) throw new Error(error.message);
+  return { todo: fromRow(data), subtask: subs[si] };
+}
+
+export async function updateSubtask(todoId, subtaskId, updates) {
+  const todo = await getTodo(todoId);
+  if (!todo) return null;
+  const subs = [...(todo.subtasks ?? [])];
+  const si = subs.findIndex((s) => s.id === subtaskId);
+  if (si === -1) return null;
+  if ("title" in updates && updates.title) subs[si].title = updates.title;
+  if ("completed" in updates) subs[si].completed = updates.completed;
+  const { data, error } = await supabase.from("todos").update({ subtasks: subs }).eq("id", todoId).select().single();
+  if (error) throw new Error(error.message);
+  return { todo: fromRow(data), subtask: subs[si] };
 }
 
 export async function deleteSubtask(todoId, subtaskId) {
-  const todos = await loadTodos();
-  const idx = todos.findIndex((t) => t.id === todoId);
-  if (idx === -1) return null;
-  const before = (todos[idx].subtasks ?? []).length;
-  todos[idx].subtasks = (todos[idx].subtasks ?? []).filter((s) => s.id !== subtaskId);
-  if (todos[idx].subtasks.length === before) return null;
-  await saveTodos(todos);
-  return todos[idx];
+  const todo = await getTodo(todoId);
+  if (!todo) return null;
+  const before = (todo.subtasks ?? []).length;
+  const subtasks = (todo.subtasks ?? []).filter((s) => s.id !== subtaskId);
+  if (subtasks.length === before) return null;
+  const { data, error } = await supabase.from("todos").update({ subtasks }).eq("id", todoId).select().single();
+  if (error) throw new Error(error.message);
+  return fromRow(data);
 }
