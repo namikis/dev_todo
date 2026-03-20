@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -12,8 +13,10 @@ import {
   listTodos,
   setCompleted,
   updateTodo,
+  requestTodo,
   addSubtask,
   toggleSubtask,
+  updateSubtask,
   deleteSubtask,
 } from "./todo-store.js";
 
@@ -21,21 +24,59 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PUBLIC_DIR = path.join(__dirname, "public");
+const DOCS_DIR = path.join(__dirname, "docs");
+
+// ---- Changelog parser (for /api/claude/* endpoints) ----
+let _changelogCache = null;
+let _changelogMtime = 0;
+
+async function getChangelogSections() {
+  const filePath = path.join(DOCS_DIR, "claude-code-changelog.md");
+  let stat;
+  try { stat = await import("node:fs/promises").then((m) => m.stat(filePath)); } catch { return []; }
+  if (_changelogCache && stat.mtimeMs === _changelogMtime) return _changelogCache;
+
+  const text = await readFile(filePath, "utf8");
+  const sections = [];
+  let current = null;
+  for (const line of text.split("\n")) {
+    const m = line.match(/^## \[?v?([^\]\s\]]+)\]?/);
+    if (m) {
+      if (current) sections.push(current);
+      current = { version: m[1], entries: [] };
+    } else if (current && line.startsWith("- ")) {
+      current.entries.push(line.slice(2).trim());
+    }
+  }
+  if (current) sections.push(current);
+  _changelogCache = sections;
+  _changelogMtime = stat.mtimeMs;
+  return sections;
+}
 
 const AddSchema = z.object({
   title: z.string().min(1),
   dueDate: z.string().nullable().optional(),
   memo: z.string().nullable().optional(),
+  assignee: z.enum(["Claude", "Tairyu"]).nullable().optional(),
+  type: z.enum(["research", "implement"]).nullable().optional(),
+  project: z.string().nullable().optional(),
 });
 const PatchSchema = z.object({
   completed: z.boolean().optional(),
   title: z.string().min(1).optional(),
   dueDate: z.string().nullable().optional(),
   memo: z.string().nullable().optional(),
+  assignee: z.enum(["Claude", "Tairyu"]).nullable().optional(),
+  type: z.enum(["research", "implement"]).nullable().optional(),
+  project: z.string().nullable().optional(),
 });
 const ClearSchema = z.object({ confirm: z.boolean().optional().default(false) });
 const SubtaskAddSchema = z.object({ title: z.string().min(1) });
-const SubtaskPatchSchema = z.object({ completed: z.boolean() });
+const SubtaskPatchSchema = z.object({
+  completed: z.boolean().optional(),
+  title: z.string().min(1).optional(),
+});
 
 function json(res, status, body) {
   const data = JSON.stringify(body);
@@ -82,6 +123,7 @@ function contentTypeFor(filePath) {
 async function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname === "/") pathname = "/index.html";
+  if (pathname === "/claude") pathname = "/claude.html";
 
   const candidate = path.normalize(path.join(PUBLIC_DIR, pathname));
   if (!candidate.startsWith(PUBLIC_DIR)) {
@@ -104,6 +146,87 @@ async function serveStatic(req, res, url) {
 async function handleApi(req, res, url) {
   const { pathname, searchParams } = url;
 
+  // GET /api/claude/versions — バージョン一覧
+  if (req.method === "GET" && pathname === "/api/claude/versions") {
+    const sections = await getChangelogSections();
+    const versions = sections.map((s) => s.version);
+    return json(res, 200, { versions, latest: versions[0] ?? null });
+  }
+
+  // GET /api/claude/diff?from=X&to=Y — バージョン間差分
+  if (req.method === "GET" && pathname === "/api/claude/diff") {
+    const from = searchParams.get("from");
+    const to = searchParams.get("to");
+    if (!from || !to) return text(res, 400, "from and to are required");
+    const sections = await getChangelogSections();
+    const fromIdx = sections.findIndex((s) => s.version === from);
+    const toIdx = sections.findIndex((s) => s.version === to);
+    if (fromIdx === -1 || toIdx === -1) return json(res, 200, { sections: [] });
+    // newer versions have smaller index; "from" should be older (larger idx)
+    const start = Math.min(fromIdx, toIdx);
+    const end = Math.max(fromIdx, toIdx);
+    const result = sections.slice(start, end); // excludes "from" version itself
+    return json(res, 200, { sections: result });
+  }
+
+  // GET /api/claude/official-docs — Anthropic 公式ドキュメント
+  if (req.method === "GET" && pathname === "/api/claude/official-docs") {
+    const p = path.join(DOCS_DIR, "claude-code-official-docs.md");
+    try {
+      return text(res, 200, await readFile(p, "utf8"));
+    } catch {
+      return text(res, 404, "`npm run docs:official` を実行してください。");
+    }
+  }
+
+  // GET /api/claude/features — 機能カタログ
+  if (req.method === "GET" && pathname === "/api/claude/features") {
+    const p = path.join(DOCS_DIR, "claude-code-current-features.md");
+    try {
+      return text(res, 200, await readFile(p, "utf8"));
+    } catch {
+      // fallback to features overview
+      try {
+        return text(res, 200, await readFile(path.join(DOCS_DIR, "claude-code-features.md"), "utf8"));
+      } catch {
+        return text(res, 404, "`npm run claude:update` を実行してください。");
+      }
+    }
+  }
+
+  // GET /api/docs/spec
+  if (req.method === "GET" && pathname === "/api/docs/spec") {
+    const specPath = path.join(DOCS_DIR, "spec.md");
+    try {
+      const content = await readFile(specPath, "utf8");
+      return text(res, 200, content);
+    } catch {
+      return text(res, 404, "docs/spec.md が見つかりません。`npm run docs` を実行してください。");
+    }
+  }
+
+  // GET /api/docs/diff
+  if (req.method === "GET" && pathname === "/api/docs/diff") {
+    const diffPath = path.join(DOCS_DIR, "diff-report.md");
+    try {
+      const content = await readFile(diffPath, "utf8");
+      return text(res, 200, content);
+    } catch {
+      return text(res, 404, "docs/diff-report.md が見つかりません。`npm run docs:diff` を実行してください。");
+    }
+  }
+
+  // GET /api/docs/claude
+  if (req.method === "GET" && pathname === "/api/docs/claude") {
+    const claudePath = path.join(DOCS_DIR, "claude-code-features.md");
+    try {
+      const content = await readFile(claudePath, "utf8");
+      return text(res, 200, content);
+    } catch {
+      return text(res, 404, "docs/claude-code-features.md が見つかりません。`npm run claude:update` を実行してください。");
+    }
+  }
+
   // GET /api/todos
   if (req.method === "GET" && pathname === "/api/todos") {
     const status = searchParams.get("status") ?? "all";
@@ -121,6 +244,9 @@ async function handleApi(req, res, url) {
     const todo = await addTodo(body.title, {
       dueDate: body.dueDate ?? null,
       memo: body.memo ?? null,
+      assignee: body.assignee ?? null,
+      type: body.type ?? null,
+      project: body.project ?? null,
     });
     return json(res, 200, { todo });
   }
@@ -150,7 +276,7 @@ async function handleApi(req, res, url) {
     // PATCH /api/todos/:id/subtasks/:subtaskId
     if (req.method === "PATCH" && subtaskId) {
       const body = SubtaskPatchSchema.parse(await readJson(req));
-      const result = await toggleSubtask(todoId, subtaskId, body.completed);
+      const result = await updateSubtask(todoId, subtaskId, body);
       if (!result) return text(res, 404, "not found");
       return json(res, 200, { todo: result.todo, subtask: result.subtask });
     }
@@ -161,6 +287,15 @@ async function handleApi(req, res, url) {
       if (!todo) return text(res, 404, "not found");
       return json(res, 200, { todo });
     }
+  }
+
+  // POST /api/todos/:id/request
+  const reqMatch = pathname.match(/^\/api\/todos\/([^/]+)\/request$/);
+  if (reqMatch && req.method === "POST") {
+    const id = decodeURIComponent(reqMatch[1]);
+    const todo = await requestTodo(id);
+    if (!todo) return text(res, 404, "not found");
+    return json(res, 200, { todo });
   }
 
   // Single todo routes: /api/todos/:id

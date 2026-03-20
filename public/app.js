@@ -1,19 +1,206 @@
 const $ = (id) => document.getElementById(id);
 
+// --- Markdown renderer ---
+function escHtml(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function mdInline(s) {
+  s = escHtml(s);
+  s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+  return s;
+}
+function renderMarkdown(md) {
+  const lines = md.split("\n");
+  let html = "";
+  let inCode = false;
+  let inTable = false;
+  let inList = false;
+  let codeLines = [];
+
+  const flushList = () => { if (inList) { html += "</ul>"; inList = false; } };
+  const flushTable = () => { if (inTable) { html += "</tbody></table>"; inTable = false; } };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.startsWith("```")) {
+      if (inCode) {
+        html += `<pre><code>${codeLines.map(escHtml).join("\n")}</code></pre>`;
+        codeLines = [];
+        inCode = false;
+      } else {
+        flushList(); flushTable();
+        inCode = true;
+      }
+      continue;
+    }
+    if (inCode) { codeLines.push(line); continue; }
+
+    if (/^#{1,6} /.test(line)) {
+      flushList(); flushTable();
+      const level = line.match(/^(#+)/)[1].length;
+      html += `<h${level}>${mdInline(line.replace(/^#+\s+/, ""))}</h${level}>`;
+      continue;
+    }
+    if (line.trim() === "---" || line.trim() === "***") {
+      flushList(); flushTable();
+      html += "<hr>";
+      continue;
+    }
+    if (line.startsWith("> ")) {
+      flushList(); flushTable();
+      html += `<blockquote>${mdInline(line.slice(2))}</blockquote>`;
+      continue;
+    }
+    if (line.startsWith("- ") || line.startsWith("* ")) {
+      flushTable();
+      if (!inList) { html += "<ul>"; inList = true; }
+      html += `<li>${mdInline(line.slice(2))}</li>`;
+      continue;
+    }
+    if (line.startsWith("|")) {
+      flushList();
+      const cells = line.split("|").filter((_, ci, a) => ci > 0 && ci < a.length - 1);
+      const isSep = cells.every((c) => /^[\s\-:]+$/.test(c));
+      if (!inTable) {
+        html += `<table><thead><tr>${cells.map((c) => `<th>${mdInline(c.trim())}</th>`).join("")}</tr></thead><tbody>`;
+        inTable = true;
+      } else if (!isSep) {
+        html += `<tr>${cells.map((c) => `<td>${mdInline(c.trim())}</td>`).join("")}</tr>`;
+      }
+      continue;
+    }
+
+    flushTable();
+    if (line.trim() === "") {
+      flushList();
+      html += "";
+      continue;
+    }
+    flushList();
+    html += `<p>${mdInline(line)}</p>`;
+  }
+  flushList(); flushTable();
+  return html;
+}
+
+// --- Docs modal ---
+let docsOverlay = null;
+let docsActiveTab = "spec";
+
+function createDocsModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "docs-overlay";
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeDocsModal(); });
+
+  const modal = document.createElement("div");
+  modal.className = "docs-modal";
+
+  const header = document.createElement("div");
+  header.className = "docs-modal-header";
+
+  const tabsEl = document.createElement("div");
+  tabsEl.className = "docs-modal-tabs";
+
+  const tabs = [
+    { id: "spec", label: "プロジェクト仕様書" },
+    { id: "claude", label: "Claude Code 機能" },
+    { id: "diff", label: "差分レポート" },
+  ];
+
+  const body = document.createElement("div");
+  body.className = "docs-modal-body";
+
+  function setTab(tabId) {
+    docsActiveTab = tabId;
+    tabsEl.querySelectorAll(".docs-tab").forEach((t) => {
+      t.classList.toggle("active", t.dataset.tab === tabId);
+    });
+    loadDocsContent(tabId, body);
+  }
+
+  for (const tab of tabs) {
+    const btn = document.createElement("button");
+    btn.className = "docs-tab" + (tab.id === docsActiveTab ? " active" : "");
+    btn.dataset.tab = tab.id;
+    btn.textContent = tab.label;
+    btn.addEventListener("click", () => setTab(tab.id));
+    tabsEl.append(btn);
+  }
+
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "docs-close";
+  closeBtn.textContent = "✕";
+  closeBtn.addEventListener("click", closeDocsModal);
+
+  header.append(tabsEl, closeBtn);
+  modal.append(header, body);
+  overlay.append(modal);
+
+  document.addEventListener("keydown", onDocsKeydown);
+  loadDocsContent(docsActiveTab, body);
+  return overlay;
+}
+
+function onDocsKeydown(e) {
+  if (e.key === "Escape") closeDocsModal();
+}
+
+function closeDocsModal() {
+  if (docsOverlay) {
+    docsOverlay.remove();
+    docsOverlay = null;
+    document.removeEventListener("keydown", onDocsKeydown);
+  }
+}
+
+async function loadDocsContent(tab, bodyEl) {
+  const pathMap = {
+    spec: "/api/docs/spec",
+    claude: "/api/docs/claude",
+    diff: "/api/docs/diff",
+  };
+  bodyEl.innerHTML = '<div class="docs-loading">読み込み中...</div>';
+  try {
+    const res = await fetch(pathMap[tab]);
+    const content = await res.text();
+    const wrapper = document.createElement("div");
+    wrapper.className = "md-content";
+    wrapper.innerHTML = renderMarkdown(content);
+    bodyEl.innerHTML = "";
+    bodyEl.append(wrapper);
+  } catch (e) {
+    bodyEl.innerHTML = `<div class="docs-loading">取得に失敗しました: ${e.message}</div>`;
+  }
+}
+
 const els = {
   addForm: $("addForm"),
   title: $("title"),
   dueDate: $("dueDate"),
+  assignee: $("assignee"),
+  type: $("type"),
+  project: $("project"),
+  projectList: $("projectList"),
   list: $("list"),
   filter: $("filter"),
+  assigneeFilter: $("assigneeFilter"),
+  projectFilter: $("projectFilter"),
+  search: $("search"),
   refresh: $("refresh"),
   summary: $("summary"),
-  clearCompleted: $("clearCompleted"),
+  completedSection: $("completedSection"),
+  toggleCompleted: $("toggleCompleted"),
+  completedList: $("completedList"),
   error: $("error"),
 };
 
 // Track which todo detail panels are open
 const openDetails = new Set();
+let showCompleted = false;
 
 function showError(message) {
   if (!message) {
@@ -42,6 +229,51 @@ function isOverdue(dateStr) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return new Date(dateStr) < today;
+}
+
+// Sort: dueDate ascending (nulls last), then createdAt descending
+function sortTodos(todos) {
+  return [...todos].sort((a, b) => {
+    // Both have dueDate
+    if (a.dueDate && b.dueDate) return a.dueDate.localeCompare(b.dueDate);
+    // Only one has dueDate — it comes first
+    if (a.dueDate && !b.dueDate) return -1;
+    if (!a.dueDate && b.dueDate) return 1;
+    // Neither has dueDate — newer first
+    return b.createdAt.localeCompare(a.createdAt);
+  });
+}
+
+// Group by project, alphabetical, null last
+function groupByProject(todos) {
+  const map = new Map();
+  for (const t of todos) {
+    const key = t.project ?? null;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(t);
+  }
+  const entries = [...map.entries()].sort(([a], [b]) => {
+    if (a && b) return a.localeCompare(b);
+    if (a && !b) return -1;
+    return 1;
+  });
+  return entries.map(([project, items]) => ({ project, items }));
+}
+
+// Group sorted todos by dueDate, dates ascending, null last
+function groupByDueDate(todos) {
+  const map = new Map();
+  for (const t of todos) {
+    const key = t.dueDate ?? null;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(t);
+  }
+  const entries = [...map.entries()].sort(([a], [b]) => {
+    if (a && b) return a.localeCompare(b);
+    if (a && !b) return -1;
+    return 1;
+  });
+  return entries.map(([date, items]) => ({ date, items }));
 }
 
 function renderSubtasks(todo, container) {
@@ -75,7 +307,40 @@ function renderSubtasks(todo, container) {
     });
 
     const span = document.createElement("span");
+    span.className = "subtask-title";
     span.textContent = sub.title;
+    span.addEventListener("dblclick", () => {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "inline-edit";
+      input.value = sub.title;
+      span.replaceWith(input);
+      input.focus();
+      input.select();
+      let saved = false;
+      const save = async () => {
+        if (saved) return;
+        saved = true;
+        const newTitle = input.value.trim();
+        if (newTitle && newTitle !== sub.title) {
+          try {
+            await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks/${encodeURIComponent(sub.id)}`, {
+              method: "PATCH",
+              body: JSON.stringify({ title: newTitle }),
+            });
+          } catch (e) {
+            showError(e.message);
+          }
+        }
+        await refresh();
+      };
+      input.addEventListener("blur", save);
+      input.addEventListener("keydown", (e) => {
+        if (e.isComposing) return;
+        if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+        if (e.key === "Escape") { input.value = sub.title; input.blur(); }
+      });
+    });
 
     const del = document.createElement("button");
     del.className = "button small danger";
@@ -125,6 +390,7 @@ function renderSubtasks(todo, container) {
 
   addBtn.addEventListener("click", doAdd);
   input.addEventListener("keydown", (e) => {
+    if (e.isComposing) return;
     if (e.key === "Enter") {
       e.preventDefault();
       doAdd();
@@ -159,7 +425,43 @@ function renderDetail(todo, detailEl) {
       showError(e.message);
     }
   });
-  dueRow.append(dueLabel, dueInput);
+  const todayBtn = document.createElement("button");
+  todayBtn.className = "button small today-btn";
+  todayBtn.type = "button";
+  todayBtn.textContent = "今日";
+  todayBtn.addEventListener("click", () => {
+    dueInput.value = new Date().toLocaleDateString("sv-SE");
+    dueInput.dispatchEvent(new Event("change"));
+  });
+  dueRow.append(dueLabel, dueInput, todayBtn);
+
+  // Assignee
+  const assigneeRow = document.createElement("div");
+  assigneeRow.className = "detail-row";
+  const assigneeLabel = document.createElement("span");
+  assigneeLabel.className = "detail-label";
+  assigneeLabel.textContent = "担当";
+  const assigneeSelect = document.createElement("select");
+  assigneeSelect.className = "detail-input";
+  for (const [val, label] of [["", "なし"], ["Tairyu", "Tairyu"], ["Claude", "Claude"]]) {
+    const opt = document.createElement("option");
+    opt.value = val;
+    opt.textContent = label;
+    if ((todo.assignee ?? "") === val) opt.selected = true;
+    assigneeSelect.append(opt);
+  }
+  assigneeSelect.addEventListener("change", async () => {
+    try {
+      await api(`/api/todos/${encodeURIComponent(todo.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ assignee: assigneeSelect.value || null }),
+      });
+      await refresh();
+    } catch (e) {
+      showError(e.message);
+    }
+  });
+  assigneeRow.append(assigneeLabel, assigneeSelect);
 
   // Memo
   const memoRow = document.createElement("div");
@@ -187,113 +489,367 @@ function renderDetail(todo, detailEl) {
   });
   memoRow.append(memoLabel, memoInput);
 
-  detailEl.append(dueRow, memoRow);
+  // Type
+  const typeRow = document.createElement("div");
+  typeRow.className = "detail-row";
+  const typeLabel = document.createElement("span");
+  typeLabel.className = "detail-label";
+  typeLabel.textContent = "タイプ";
+  const typeSelect = document.createElement("select");
+  typeSelect.className = "detail-input";
+  for (const [val, label] of [["", "なし"], ["research", "調査"], ["implement", "実装"]]) {
+    const opt = document.createElement("option");
+    opt.value = val;
+    opt.textContent = label;
+    if ((todo.type ?? "") === val) opt.selected = true;
+    typeSelect.append(opt);
+  }
+  typeSelect.addEventListener("change", async () => {
+    try {
+      await api(`/api/todos/${encodeURIComponent(todo.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ type: typeSelect.value || null }),
+      });
+      await refresh();
+    } catch (e) {
+      showError(e.message);
+    }
+  });
+  typeRow.append(typeLabel, typeSelect);
+
+  // Project
+  const projectRow = document.createElement("div");
+  projectRow.className = "detail-row";
+  const projectLabel = document.createElement("span");
+  projectLabel.className = "detail-label";
+  projectLabel.textContent = "PJ";
+  const projectInput = document.createElement("input");
+  projectInput.type = "text";
+  projectInput.className = "detail-input";
+  projectInput.placeholder = "プロジェクト名";
+  projectInput.value = todo.project ?? "";
+  projectInput.setAttribute("list", "projectList");
+  let projectTimer = null;
+  projectInput.addEventListener("input", () => {
+    clearTimeout(projectTimer);
+    projectTimer = setTimeout(async () => {
+      try {
+        await api(`/api/todos/${encodeURIComponent(todo.id)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ project: projectInput.value || null }),
+        });
+        await refresh();
+      } catch (e) {
+        showError(e.message);
+      }
+    }, 500);
+  });
+  projectRow.append(projectLabel, projectInput);
+
+  detailEl.append(dueRow, assigneeRow, typeRow, projectRow, memoRow);
 
   // Subtasks
   const subtaskSection = document.createElement("div");
   subtaskSection.className = "subtask-section";
   renderSubtasks(todo, subtaskSection);
   detailEl.append(subtaskSection);
+
+  // Task ID copy
+  const idRow = document.createElement("div");
+  idRow.className = "detail-id-row";
+  const idLabel = document.createElement("span");
+  idLabel.className = "detail-id-label";
+  idLabel.textContent = `ID: ${todo.id}`;
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "button small copy-btn";
+  copyBtn.textContent = "コピー";
+  copyBtn.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(todo.id);
+    copyBtn.textContent = "コピー済";
+    setTimeout(() => { copyBtn.textContent = "コピー"; }, 1500);
+  });
+  idRow.append(idLabel, copyBtn);
+  detailEl.append(idRow);
 }
 
-function render(todos) {
-  els.list.innerHTML = "";
-  const open = todos.filter((t) => !t.completed).length;
-  const done = todos.filter((t) => t.completed).length;
-  els.summary.textContent = `未完了 ${open} / 完了 ${done}（合計 ${todos.length}）`;
+function renderTodoItem(t, listEl) {
+  const li = document.createElement("li");
+  li.className = `todo ${t.completed ? "done" : ""}`;
 
-  for (const t of todos) {
-    const li = document.createElement("li");
-    li.className = `todo ${t.completed ? "done" : ""}`;
+  // Main row
+  const row = document.createElement("div");
+  row.className = "todo-row";
 
-    // Main row
-    const row = document.createElement("div");
-    row.className = "todo-row";
+  const cb = document.createElement("input");
+  cb.type = "checkbox";
+  cb.checked = !!t.completed;
+  cb.addEventListener("change", async () => {
+    try {
+      showError("");
+      await api(`/api/todos/${encodeURIComponent(t.id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ completed: cb.checked }),
+      });
+      await refresh();
+    } catch (e) {
+      showError(e.message);
+      cb.checked = !cb.checked;
+    }
+  });
 
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = !!t.completed;
-    cb.addEventListener("change", async () => {
-      try {
-        showError("");
-        await api(`/api/todos/${encodeURIComponent(t.id)}`, {
-          method: "PATCH",
-          body: JSON.stringify({ completed: cb.checked }),
-        });
-        await refresh();
-      } catch (e) {
-        showError(e.message);
-        cb.checked = !cb.checked;
-      }
-    });
-
-    const title = document.createElement("div");
-    title.className = "todo-title";
-    title.textContent = t.title;
-    title.title = "クリックで詳細を開閉";
-    title.addEventListener("click", () => {
+  const title = document.createElement("div");
+  title.className = "todo-title";
+  title.textContent = t.title;
+  title.title = "クリックで詳細を開閉 / ダブルクリックで編集";
+  let clickTimer = null;
+  title.addEventListener("click", () => {
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => {
       if (openDetails.has(t.id)) {
         openDetails.delete(t.id);
       } else {
         openDetails.add(t.id);
       }
       refresh();
-    });
-
-    const meta = document.createElement("div");
-    meta.className = "todo-meta";
-
-    if (t.dueDate) {
-      const duePill = document.createElement("span");
-      duePill.className = `pill ${isOverdue(t.dueDate) && !t.completed ? "overdue" : "due"}`;
-      duePill.textContent = t.dueDate;
-      meta.append(duePill);
-    }
-
-    const subsCount = (t.subtasks ?? []).length;
-    if (subsCount > 0) {
-      const subsDone = (t.subtasks ?? []).filter((s) => s.completed).length;
-      const subPill = document.createElement("span");
-      subPill.className = "pill";
-      subPill.textContent = `${subsDone}/${subsCount}`;
-      meta.append(subPill);
-    }
-
-    if (t.memo) {
-      const memoPill = document.createElement("span");
-      memoPill.className = "pill";
-      memoPill.textContent = "memo";
-      meta.append(memoPill);
-    }
-
-    const del = document.createElement("button");
-    del.className = "button small danger";
-    del.textContent = "削除";
-    del.addEventListener("click", async () => {
-      if (!confirm("削除しますか？")) return;
-      try {
-        showError("");
-        await api(`/api/todos/${encodeURIComponent(t.id)}`, { method: "DELETE" });
-        openDetails.delete(t.id);
-        await refresh();
-      } catch (e) {
-        showError(e.message);
+    }, 220);
+  });
+  title.addEventListener("dblclick", (e) => {
+    e.stopPropagation();
+    clearTimeout(clickTimer);
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "inline-edit";
+    input.value = t.title;
+    title.replaceWith(input);
+    input.focus();
+    input.select();
+    let saved = false;
+    const save = async () => {
+      if (saved) return;
+      saved = true;
+      const newTitle = input.value.trim();
+      if (newTitle && newTitle !== t.title) {
+        try {
+          await api(`/api/todos/${encodeURIComponent(t.id)}`, {
+            method: "PATCH",
+            body: JSON.stringify({ title: newTitle }),
+          });
+        } catch (e) {
+          showError(e.message);
+        }
       }
+      await refresh();
+    };
+    input.addEventListener("blur", save);
+    input.addEventListener("keydown", (ev) => {
+      if (ev.isComposing) return;
+      if (ev.key === "Enter") { ev.preventDefault(); input.blur(); }
+      if (ev.key === "Escape") { input.value = t.title; input.blur(); }
     });
-    meta.append(del);
+  });
 
-    row.append(cb, title, meta);
-    li.append(row);
+  const meta = document.createElement("div");
+  meta.className = "todo-meta";
 
-    // Detail panel (collapsible)
-    if (openDetails.has(t.id)) {
-      const detail = document.createElement("div");
-      detail.className = "todo-detail";
-      renderDetail(t, detail);
-      li.append(detail);
+  if (t.assignee) {
+    const assigneePill = document.createElement("span");
+    assigneePill.className = `pill assignee-pill ${t.assignee.toLowerCase()}`;
+    assigneePill.textContent = t.assignee;
+    meta.append(assigneePill);
+  }
+
+  // Status indicator
+  if (t.assignee === "Claude" && !t.completed) {
+    const status = t.status ?? "open";
+    if (status === "open") {
+      const reqBtn = document.createElement("button");
+      reqBtn.className = "button small request-btn";
+      reqBtn.textContent = "リクエスト";
+      reqBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        try {
+          await api(`/api/todos/${encodeURIComponent(t.id)}/request`, { method: "POST" });
+          await refresh();
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+      meta.append(reqBtn);
+    } else if (status === "requested") {
+      const pill = document.createElement("span");
+      pill.className = "pill status-pill requested";
+      pill.textContent = "⏳ 待機中";
+      meta.append(pill);
+    } else if (status === "running") {
+      const pill = document.createElement("span");
+      pill.className = "pill status-pill running";
+      pill.textContent = "⚙ 実行中";
+      meta.append(pill);
+    } else if (status === "done") {
+      const pill = document.createElement("span");
+      pill.className = "pill status-pill done";
+      pill.textContent = "✓ 完了";
+      meta.append(pill);
+      if (t.prUrl) {
+        const link = document.createElement("a");
+        link.className = "pill status-link";
+        link.href = t.prUrl;
+        link.target = "_blank";
+        link.textContent = "PR";
+        meta.append(link);
+      }
+      if (t.reportUrl) {
+        const link = document.createElement("a");
+        link.className = "pill status-link";
+        link.href = t.reportUrl;
+        link.target = "_blank";
+        link.textContent = "レポート";
+        meta.append(link);
+      }
+    } else if (status === "error") {
+      const pill = document.createElement("span");
+      pill.className = "pill status-pill error";
+      pill.textContent = "✕ エラー";
+      pill.title = t.result ?? "";
+      meta.append(pill);
     }
+  }
 
-    els.list.append(li);
+  const subsCount = (t.subtasks ?? []).length;
+  if (subsCount > 0) {
+    const subsDone = (t.subtasks ?? []).filter((s) => s.completed).length;
+    const subPill = document.createElement("span");
+    subPill.className = "pill sub-pill";
+    subPill.textContent = `${subsDone}/${subsCount}`;
+    meta.append(subPill);
+  }
+
+  const del = document.createElement("button");
+  del.className = "button small danger";
+  del.textContent = "削除";
+  del.addEventListener("click", async () => {
+    if (!confirm("削除しますか？")) return;
+    try {
+      showError("");
+      await api(`/api/todos/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+      openDetails.delete(t.id);
+      await refresh();
+    } catch (e) {
+      showError(e.message);
+    }
+  });
+  meta.append(del);
+
+  const dateEl = document.createElement("div");
+  dateEl.className = `todo-date${!t.dueDate ? " unset" : isOverdue(t.dueDate) && !t.completed ? " overdue" : " due"}`;
+  dateEl.textContent = t.dueDate ?? "—";
+  row.append(cb, dateEl, title, meta);
+  li.append(row);
+
+  // Detail panel (collapsible)
+  if (openDetails.has(t.id)) {
+    const detail = document.createElement("div");
+    detail.className = "todo-detail";
+    renderDetail(t, detail);
+    li.append(detail);
+  }
+
+  listEl.append(li);
+}
+
+function render(todos) {
+  els.list.innerHTML = "";
+  els.completedList.innerHTML = "";
+
+  const searchTerm = els.search.value.trim().toLowerCase();
+  const assigneeFilter = els.assigneeFilter.value;
+
+  const projectFilter = els.projectFilter.value;
+
+  // Build project list for datalist and filter dropdown
+  const projects = [...new Set(todos.map((t) => t.project).filter(Boolean))].sort();
+  els.projectList.innerHTML = "";
+  for (const p of projects) {
+    const opt = document.createElement("option");
+    opt.value = p;
+    els.projectList.append(opt);
+  }
+  // Update project filter dropdown (preserve selection)
+  const currentOptions = new Set([...els.projectFilter.options].map((o) => o.value));
+  const desiredOptions = new Set(["all", ...projects]);
+  if ([...currentOptions].join(",") !== [...desiredOptions].join(",")) {
+    els.projectFilter.innerHTML = "";
+    const allOpt = document.createElement("option");
+    allOpt.value = "all";
+    allOpt.textContent = "すべて";
+    els.projectFilter.append(allOpt);
+    for (const p of projects) {
+      const opt = document.createElement("option");
+      opt.value = p;
+      opt.textContent = p;
+      els.projectFilter.append(opt);
+    }
+    if (desiredOptions.has(projectFilter)) els.projectFilter.value = projectFilter;
+  }
+
+  // Apply search, assignee & project filter
+  let filtered = todos;
+  if (searchTerm) {
+    filtered = filtered.filter(
+      (t) =>
+        t.title.toLowerCase().includes(searchTerm) ||
+        (t.memo ?? "").toLowerCase().includes(searchTerm) ||
+        (t.project ?? "").toLowerCase().includes(searchTerm) ||
+        (t.subtasks ?? []).some((s) => s.title.toLowerCase().includes(searchTerm))
+    );
+  }
+  if (assigneeFilter !== "all") {
+    filtered = filtered.filter((t) => t.assignee === assigneeFilter);
+  }
+  if (projectFilter !== "all") {
+    filtered = filtered.filter((t) => t.project === projectFilter);
+  }
+
+  const openTodos = sortTodos(filtered.filter((t) => !t.completed));
+  const doneTodos = filtered.filter((t) => t.completed);
+
+  const openCount = todos.filter((t) => !t.completed).length;
+  const doneCount = todos.filter((t) => t.completed).length;
+  els.summary.textContent = `未完了 ${openCount} / 完了 ${doneCount}（合計 ${todos.length}）`;
+
+  // Group by project, then by dueDate within each project
+  const projectGroups = groupByProject(openTodos);
+  for (const pg of projectGroups) {
+    // Project header
+    const projHeader = document.createElement("li");
+    projHeader.className = `project-separator${pg.project ? "" : " unset"}`;
+    projHeader.textContent = pg.project ?? "プロジェクト未設定";
+    els.list.append(projHeader);
+
+    const dateGroups = groupByDueDate(pg.items);
+    for (const dg of dateGroups) {
+      const sep = document.createElement("li");
+      sep.className = `date-separator${dg.date ? "" : " unset"}`;
+      sep.textContent = dg.date ?? "実施日未設定";
+      els.list.append(sep);
+      for (const t of dg.items) renderTodoItem(t, els.list);
+    }
+  }
+
+  // Completed section
+  if (doneCount > 0) {
+    els.completedSection.hidden = false;
+    els.toggleCompleted.textContent = showCompleted
+      ? `完了済みを隠す (${doneTodos.length})`
+      : `完了済みを表示 (${doneTodos.length})`;
+    els.completedList.hidden = !showCompleted;
+    if (showCompleted) {
+      for (const t of doneTodos) {
+        renderTodoItem(t, els.completedList);
+      }
+    }
+  } else {
+    els.completedSection.hidden = true;
   }
 }
 
@@ -308,31 +864,52 @@ els.addForm.addEventListener("submit", async (e) => {
   const title = els.title.value.trim();
   if (!title) return;
   const dueDate = els.dueDate.value || null;
+  const assignee = els.assignee.value || null;
+  const type = els.type.value || null;
+  const project = els.project.value.trim() || null;
   try {
     showError("");
     await api("/api/todos", {
       method: "POST",
-      body: JSON.stringify({ title, dueDate }),
+      body: JSON.stringify({ title, dueDate, assignee, type, project }),
     });
     els.title.value = "";
     els.dueDate.value = "";
+    els.assignee.value = "";
+    els.type.value = "";
+    els.project.value = "";
     await refresh();
   } catch (err) {
     showError(err.message);
   }
 });
 
+$("todayBtn").addEventListener("click", () => {
+  els.dueDate.value = new Date().toLocaleDateString("sv-SE");
+});
+
 els.filter.addEventListener("change", () => refresh().catch((e) => showError(e.message)));
+els.assigneeFilter.addEventListener("change", () => refresh().catch((e) => showError(e.message)));
+els.projectFilter.addEventListener("change", () => refresh().catch((e) => showError(e.message)));
 els.refresh.addEventListener("click", () => refresh().catch((e) => showError(e.message)));
-els.clearCompleted.addEventListener("click", async () => {
-  if (!confirm("完了済みTODOをすべて削除しますか？")) return;
-  try {
-    showError("");
-    await api("/api/todos/clear-completed", { method: "POST", body: JSON.stringify({ confirm: true }) });
-    await refresh();
-  } catch (e) {
-    showError(e.message);
-  }
+
+els.toggleCompleted.addEventListener("click", () => {
+  showCompleted = !showCompleted;
+  refresh().catch((e) => showError(e.message));
+});
+
+let searchTimer = null;
+els.search.addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    refresh().catch((e) => showError(e.message));
+  }, 200);
+});
+
+$("docsBtn").addEventListener("click", () => {
+  if (docsOverlay) { closeDocsModal(); return; }
+  docsOverlay = createDocsModal();
+  document.body.append(docsOverlay);
 });
 
 refresh().catch((e) => showError(e.message));

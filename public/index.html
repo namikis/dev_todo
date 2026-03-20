@@ -22,7 +22,21 @@
               <option value="done">完了</option>
             </select>
           </label>
-          <button id="clearCompleted" class="button danger">完了を削除</button>
+          <label class="select">
+            <span class="muted">担当</span>
+            <select id="assigneeFilter">
+              <option value="all">全員</option>
+              <option value="Tairyu">Tairyu</option>
+              <option value="Claude">Claude</option>
+            </select>
+          </label>
+          <label class="select">
+            <span class="muted">PJ</span>
+            <select id="projectFilter">
+              <option value="all">すべて</option>
+            </select>
+          </label>
+          <button id="docsBtn" class="button docs-btn">仕様書</button>
         </div>
       </header>
 
@@ -31,6 +45,19 @@
           <div class="row">
             <input id="title" class="input" type="text" placeholder="タスク名" required />
             <input id="dueDate" class="input date-input" type="date" />
+            <button id="todayBtn" class="button small today-btn" type="button">今日</button>
+            <select id="assignee" class="input assignee-input">
+              <option value="">担当なし</option>
+              <option value="Tairyu">Tairyu</option>
+              <option value="Claude">Claude</option>
+            </select>
+            <select id="type" class="input type-input">
+              <option value="">タイプなし</option>
+              <option value="research">調査</option>
+              <option value="implement">実装</option>
+            </select>
+            <input id="project" class="input project-input" type="text" placeholder="プロジェクト" list="projectList" />
+            <datalist id="projectList"></datalist>
             <button class="button primary" type="submit">追加</button>
           </div>
         </form>
@@ -39,10 +66,19 @@
 
       <section class="card">
         <div class="row space-between">
-          <div class="muted" id="summary">-</div>
-          <button id="refresh" class="button">更新</button>
+          <div class="row" style="gap:10px;flex:1">
+            <div class="muted" id="summary">-</div>
+          </div>
+          <div class="row" style="gap:8px">
+            <input id="search" class="input search-input" type="text" placeholder="検索..." />
+            <button id="refresh" class="button">更新</button>
+          </div>
         </div>
         <ul id="list" class="list"></ul>
+        <div id="completedSection" class="completed-section" hidden>
+          <button id="toggleCompleted" class="button completed-toggle">完了済みを表示</button>
+          <ul id="completedList" class="list completed-list" hidden></ul>
+        </div>
       </section>
     </div>
 
