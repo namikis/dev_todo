@@ -40,10 +40,12 @@ server.registerTool(
       title: z.string().min(1).describe("タスクのタイトル"),
       dueDate: z.string().nullable().optional().describe("実施日 (YYYY-MM-DD)"),
       memo: z.string().nullable().optional().describe("メモ"),
+      assignee: z.enum(["Claude", "Tairyu"]).nullable().optional().describe("担当者 (Claude or Tairyu)"),
+      project: z.string().nullable().optional().describe("プロジェクト名 (例: remote-exec)"),
     },
   },
-  async ({ title, dueDate, memo }) => {
-    const todo = await addTodo(title, { dueDate, memo });
+  async ({ title, dueDate, memo, assignee, project }) => {
+    const todo = await addTodo(title, { dueDate, memo, assignee, project });
     return textResult(`Added.\n${formatTodo(todo)}`);
   }
 );
@@ -94,6 +96,8 @@ server.registerTool(
       title: z.string().min(1).optional().describe("新しいタイトル"),
       dueDate: z.string().nullable().optional().describe("実施日 (YYYY-MM-DD)。nullで解除"),
       memo: z.string().nullable().optional().describe("メモ。nullで解除"),
+      assignee: z.enum(["Claude", "Tairyu"]).nullable().optional().describe("担当者。nullで解除"),
+      project: z.string().nullable().optional().describe("プロジェクト名。nullで解除"),
     },
   },
   async ({ id, ...updates }) => {
