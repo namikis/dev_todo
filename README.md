@@ -1,51 +1,96 @@
 # DEV TODO
 
-開発・調査タスクを管理するローカルTODOアプリ。
-GUIとMCPの2通りでデータ（`data/todos.json`）を操作できます。
+開発・調査タスクを管理する TODO アプリ。
+Supabase をバックエンドに、GUI / MCP / Vercel デプロイに対応。
+
+**本番URL**: https://dev-todo-namikis-projects-4e343dd6.vercel.app
+
+## アーキテクチャ
+
+```
+┌──────────────────────────────┐
+│  Vercel (フロントエンド + API) │
+│  - public/ → 静的配信         │
+│  - api/   → Serverless Functions │
+└──────────┬───────────────────┘
+           │
+     ┌─────▼──────┐
+     │  Supabase   │  DB (Postgres) + Realtime
+     └─────┬──────┘
+           │
+┌──────────▼──────────────────┐
+│  ローカル PC                 │
+│  - gui-server.js (開発用)    │
+│  - mcp-todo-server.js (AI連携) │
+│  - agent-runner.js (自動実行)  │
+└─────────────────────────────┘
+```
+
+## 主要ファイル
+
+| ファイル | 役割 |
+|---------|------|
+| `todo-store.js` | データ層（Supabase CRUD） |
+| `gui-server.js` | ローカル開発用 REST API サーバー (port 5177) |
+| `mcp-todo-server.js` | MCP Server（AI エージェント連携） |
+| `agent-runner.js` | Supabase Realtime 購読 → Claude 自動実行 |
+| `api/` | Vercel Serverless Functions |
+| `public/` | フロントエンド（バニラ JS） |
+| `vercel.json` | Vercel ルーティング設定 |
 
 ## 機能
 
 - タスクの追加・完了・削除
-- **実施日（期限）** の設定・変更（期限超過は赤色表示）
+- **プロジェクト** 別グルーピング・フィルター
+- **実施日** の設定・変更（期限超過は赤色表示）
+- **担当者**（Tairyu / Claude）のアサインとフィルター
+- **タスクタイプ**（調査 / 実装）の分類
 - **サブタスク** の追加・完了・削除
 - **メモ** の自由記述（自動保存）
+- **検索** によるタスク絞り込み
 - **MCP連携** によるAIエージェントからのタスク操作
+- **Claude リクエスト** ボタンで自動実行トリガー
 
 ## 必要要件
 
-- Node.js **18以上**（推奨: 20）
-
-`.nvmrc` 同梱のため、nvm環境なら以下で揃います。
-
-```bash
-nvm use
-```
+- Node.js **20 以上**
+- Supabase プロジェクト（環境変数に URL と Key を設定）
 
 ## セットアップ
 
 ```bash
 npm install
+cp .env.example .env
+# .env に SUPABASE_URL と SUPABASE_ANON_KEY を設定
 ```
 
-## GUI（ブラウザ）
+## ローカル開発
 
 ```bash
 npm start
 ```
 
-http://127.0.0.1:5177 にアクセス。
+http://127.0.0.1:5177 にアクセス。ポート変更は `PORT` 環境変数で指定可能。
 
-タスク名クリックで詳細パネルが開き、実施日・メモ・サブタスクを編集できます。
+## Vercel デプロイ
 
-ポート変更は環境変数 `PORT` で指定可能です。
+Vercel にデプロイ済み。GitHub push で自動デプロイされる。
 
 ```bash
-PORT=3000 npm start
+vercel ls          # デプロイ状況確認
+vercel inspect URL --logs  # ビルドログ確認
 ```
 
-## MCP（AIエージェント連携）
+### 環境変数（Vercel に設定済み）
 
-stdioベースのMCPサーバとして動作します。
+| 変数 | 説明 |
+|------|------|
+| `SUPABASE_URL` | Supabase プロジェクト URL |
+| `SUPABASE_ANON_KEY` | Supabase Anon Key |
+
+## MCP（AI エージェント連携）
+
+stdio ベースの MCP サーバーとして動作。
 
 ```bash
 npm run mcp
@@ -53,36 +98,22 @@ npm run mcp
 
 ### 提供ツール
 
-| ツール | 引数 | 説明 |
-|--------|------|------|
-| `todo_add` | `{ title, dueDate?, memo? }` | タスク追加 |
-| `todo_list` | `{ status?, limit? }` | 一覧取得 |
-| `todo_get` | `{ id }` | 1件取得（詳細） |
-| `todo_update` | `{ id, title?, dueDate?, memo? }` | タスク更新 |
-| `todo_complete` | `{ id, completed? }` | 完了/未完了の切り替え |
-| `todo_delete` | `{ id }` | タスク削除 |
-| `todo_clear_completed` | `{ confirm }` | 完了済みを一括削除 |
-| `todo_add_subtask` | `{ todoId, title }` | サブタスク追加 |
-| `todo_toggle_subtask` | `{ todoId, subtaskId, completed? }` | サブタスク完了切替 |
-| `todo_delete_subtask` | `{ todoId, subtaskId }` | サブタスク削除 |
+| ツール | 説明 |
+|--------|------|
+| `todo_add` | タスク追加 |
+| `todo_list` | 一覧取得 |
+| `todo_get` | 1件取得（詳細） |
+| `todo_update` | タスク更新（タイトル・日付・メモ・担当・タイプ・プロジェクト） |
+| `todo_complete` | 完了/未完了の切り替え |
+| `todo_delete` | タスク削除 |
+| `todo_clear_completed` | 完了済みを一括削除 |
+| `todo_add_subtask` | サブタスク追加 |
+| `todo_toggle_subtask` | サブタスク完了切替 |
+| `todo_delete_subtask` | サブタスク削除 |
 
-### MCP設定手順
+### MCP 設定
 
-Claude Code（CLI / VSCode拡張）からタスク操作するための設定手順です。
-
-#### 1. 依存パッケージのインストール
-
-```bash
-cd /path/to/dev_todo
-npm install
-```
-
-#### 2. 設定ファイルの編集
-
-プロジェクトルートに `.mcp.json` を作成します（チーム共有する場合）。
-個人環境のみで使う場合は `~/.claude/settings.json` に追記しても構いません。
-
-**`.mcp.json`（推奨）**
+`.mcp.json`（プロジェクトルート）:
 
 ```json
 {
@@ -95,44 +126,34 @@ npm install
 }
 ```
 
-> **nvm環境の場合**: MCPサーバはClaude Codeのプロセスから直接起動されるため、
-> nvm管理のNodeパスが通らないことがあります。その場合はNodeの絶対パスを指定してください。
->
+> **nvm 環境の場合**: Node の絶対パスを指定してください。
 > ```bash
-> # 使用するNodeの絶対パスを確認
 > nvm which 20
-> # 例: /Users/<user>/.nvm/versions/node/v20.x.x/bin/node
-> ```
->
-> ```json
-> {
->   "mcpServers": {
->     "mcp-todo": {
->       "command": "/Users/<user>/.nvm/versions/node/v20.x.x/bin/node",
->       "args": ["./mcp-todo-server.js"]
->     }
->   }
-> }
 > ```
 
-#### 3. 接続の確認
+## REST API
 
-Claude Code を起動（またはセッションを再開）し、以下のように話しかけて動作を確認します。
+| メソッド | パス | 説明 |
+|---------|------|------|
+| GET | `/api/todos?status=all\|open\|done&limit=50` | 一覧取得 |
+| POST | `/api/todos` | タスク追加 |
+| PATCH | `/api/todos/:id` | タスク更新 |
+| DELETE | `/api/todos/:id` | タスク削除 |
+| POST | `/api/todos/:id/request` | Claude 実行リクエスト |
+| POST | `/api/todos/clear-completed` | 完了済み一括削除 |
+| POST | `/api/todos/:id/subtasks` | サブタスク追加 |
+| PATCH | `/api/todos/:id/subtasks/:subtaskId` | サブタスク更新 |
+| DELETE | `/api/todos/:id/subtasks/:subtaskId` | サブタスク削除 |
 
+## テスト
+
+```bash
+npm test              # ユニット + E2E
+npm run test:unit     # ユニットのみ
+npm run test:e2e      # Playwright E2E のみ
 ```
-TODOを一覧表示して
-```
 
-`todo_list` ツールが呼ばれ、タスク一覧が返ってくれば設定完了です。
+## プロジェクト管理
 
-#### トラブルシューティング
-
-| 症状 | 対処 |
-|------|------|
-| ツールが見つからない | Claude Code を再起動して `.mcp.json` を再読み込み |
-| `Cannot find module` エラー | `npm install` を実行済みか確認 |
-| Node.js が見つからない | `command` にNodeの絶対パスを指定（上記nvm環境の項を参照） |
-
-## データ
-
-タスクは `data/todos.json` に保存されます。GUIとMCPで同一ファイルを共有します。
+- 大掛かりな実装は `.claude/plans/[プロジェクト名]_plan.md` に計画を記載
+- タスクの `project` フィールドは plan ファイル単位で付与
