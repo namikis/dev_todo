@@ -472,7 +472,7 @@ select {
 }
 
 textarea.detail-input {
-  min-height: 60px;
+  min-height: 120px;
   resize: vertical;
   font-family: inherit;
 }
