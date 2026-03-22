@@ -54,17 +54,20 @@ $("loginForm").addEventListener("submit", async (e) => {
   const email = $("loginEmail").value.trim();
   const password = $("loginPassword").value;
   const errEl = $("loginError");
+  const loginBtn = e.target.querySelector('button[type="submit"]');
   errEl.hidden = true;
-  try {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      errEl.textContent = error.message;
+  await withLoading(loginBtn, async () => {
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        errEl.textContent = error.message;
+        errEl.hidden = false;
+      }
+    } catch (err) {
+      errEl.textContent = err.message;
       errEl.hidden = false;
     }
-  } catch (err) {
-    errEl.textContent = err.message;
-    errEl.hidden = false;
-  }
+  });
 });
 
 $("logoutBtn").addEventListener("click", async () => {
@@ -272,6 +275,25 @@ const els = {
 // Track which todo detail panels are open
 const openDetails = new Set();
 let showCompleted = false;
+let cachedTodos = null;
+
+// Loading helper: disables button, shows spinner, re-enables on completion
+async function withLoading(btn, fn) {
+  if (!btn) return fn();
+  btn.disabled = true;
+  btn.classList.add("loading");
+  try {
+    return await fn();
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("loading");
+  }
+}
+
+// Re-render from cache (no API call)
+function rerender() {
+  if (cachedTodos) render(cachedTodos);
+}
 
 function showError(message) {
   if (!message) {
@@ -369,6 +391,7 @@ function renderSubtasks(todo, container) {
     cb.checked = sub.completed;
     cb.disabled = !isLoggedIn;
     cb.addEventListener("change", async () => {
+      cb.disabled = true;
       try {
         await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks/${encodeURIComponent(sub.id)}`, {
           method: "PATCH",
@@ -377,6 +400,9 @@ function renderSubtasks(todo, container) {
         await refresh();
       } catch (e) {
         showError(e.message);
+        cb.checked = !cb.checked;
+      } finally {
+        cb.disabled = false;
       }
     });
 
@@ -422,14 +448,16 @@ function renderSubtasks(todo, container) {
       del.className = "button small danger";
       del.textContent = "×";
       del.addEventListener("click", async () => {
-        try {
-          await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks/${encodeURIComponent(sub.id)}`, {
-            method: "DELETE",
-          });
-          await refresh();
-        } catch (e) {
-          showError(e.message);
-        }
+        await withLoading(del, async () => {
+          try {
+            await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks/${encodeURIComponent(sub.id)}`, {
+              method: "DELETE",
+            });
+            await refresh();
+          } catch (e) {
+            showError(e.message);
+          }
+        });
       });
       li.append(cb, span, del);
     } else {
@@ -455,16 +483,18 @@ function renderSubtasks(todo, container) {
   const doAdd = async () => {
     const title = input.value.trim();
     if (!title) return;
-    try {
-      await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks`, {
-        method: "POST",
-        body: JSON.stringify({ title }),
-      });
-      input.value = "";
-      await refresh();
-    } catch (e) {
-      showError(e.message);
-    }
+    await withLoading(addBtn, async () => {
+      try {
+        await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks`, {
+          method: "POST",
+          body: JSON.stringify({ title }),
+        });
+        input.value = "";
+        await refresh();
+      } catch (e) {
+        showError(e.message);
+      }
+    });
   };
 
   addBtn.addEventListener("click", doAdd);
@@ -673,6 +703,7 @@ function renderTodoItem(t, listEl) {
   cb.checked = !!t.completed;
   cb.disabled = !isLoggedIn;
   cb.addEventListener("change", async () => {
+    cb.disabled = true;
     try {
       showError("");
       await api(`/api/todos/${encodeURIComponent(t.id)}`, {
@@ -683,6 +714,8 @@ function renderTodoItem(t, listEl) {
     } catch (e) {
       showError(e.message);
       cb.checked = !cb.checked;
+    } finally {
+      cb.disabled = false;
     }
   });
 
@@ -699,7 +732,7 @@ function renderTodoItem(t, listEl) {
       } else {
         openDetails.add(t.id);
       }
-      refresh();
+      rerender();
     }, 220);
   });
   title.addEventListener("dblclick", (e) => {
@@ -757,12 +790,14 @@ function renderTodoItem(t, listEl) {
       reqBtn.textContent = "リクエスト";
       reqBtn.addEventListener("click", async (e) => {
         e.stopPropagation();
-        try {
-          await api(`/api/todos/${encodeURIComponent(t.id)}/request`, { method: "POST" });
-          await refresh();
-        } catch (err) {
-          showError(err.message);
-        }
+        await withLoading(reqBtn, async () => {
+          try {
+            await api(`/api/todos/${encodeURIComponent(t.id)}/request`, { method: "POST" });
+            await refresh();
+          } catch (err) {
+            showError(err.message);
+          }
+        });
       });
       meta.append(reqBtn);
     } else if (status === "requested") {
@@ -836,14 +871,16 @@ function renderTodoItem(t, listEl) {
     del.textContent = "削除";
     del.addEventListener("click", async () => {
       if (!confirm("削除しますか？")) return;
-      try {
-        showError("");
-        await api(`/api/todos/${encodeURIComponent(t.id)}`, { method: "DELETE" });
-        openDetails.delete(t.id);
-        await refresh();
-      } catch (e) {
-        showError(e.message);
-      }
+      await withLoading(del, async () => {
+        try {
+          showError("");
+          await api(`/api/todos/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+          openDetails.delete(t.id);
+          await refresh();
+        } catch (e) {
+          showError(e.message);
+        }
+      });
     });
     meta.append(del);
   }
@@ -962,9 +999,15 @@ function render(todos) {
 }
 
 async function refresh() {
-  const status = els.filter.value;
-  const data = await api(`/api/todos?status=${encodeURIComponent(status)}&limit=200`);
-  render(data.todos);
+  els.list.classList.add("loading");
+  try {
+    const status = els.filter.value;
+    const data = await api(`/api/todos?status=${encodeURIComponent(status)}&limit=200`);
+    cachedTodos = data.todos;
+    render(cachedTodos);
+  } finally {
+    els.list.classList.remove("loading");
+  }
 }
 
 els.addForm.addEventListener("submit", async (e) => {
@@ -975,21 +1018,24 @@ els.addForm.addEventListener("submit", async (e) => {
   const assignee = els.assignee.value || null;
   const type = els.type.value || null;
   const project = els.project.value.trim() || null;
-  try {
-    showError("");
-    await api("/api/todos", {
-      method: "POST",
-      body: JSON.stringify({ title, dueDate, assignee, type, project }),
-    });
-    els.title.value = "";
-    els.dueDate.value = "";
-    els.assignee.value = "";
-    els.type.value = "";
-    els.project.value = "";
-    await refresh();
-  } catch (err) {
-    showError(err.message);
-  }
+  const submitBtn = els.addForm.querySelector('button[type="submit"]');
+  await withLoading(submitBtn, async () => {
+    try {
+      showError("");
+      await api("/api/todos", {
+        method: "POST",
+        body: JSON.stringify({ title, dueDate, assignee, type, project }),
+      });
+      els.title.value = "";
+      els.dueDate.value = "";
+      els.assignee.value = "";
+      els.type.value = "";
+      els.project.value = "";
+      await refresh();
+    } catch (err) {
+      showError(err.message);
+    }
+  });
 });
 
 $("todayBtn").addEventListener("click", () => {
@@ -997,20 +1043,20 @@ $("todayBtn").addEventListener("click", () => {
 });
 
 els.filter.addEventListener("change", () => refresh().catch((e) => showError(e.message)));
-els.assigneeFilter.addEventListener("change", () => refresh().catch((e) => showError(e.message)));
-els.projectFilter.addEventListener("change", () => refresh().catch((e) => showError(e.message)));
-els.refresh.addEventListener("click", () => refresh().catch((e) => showError(e.message)));
+els.assigneeFilter.addEventListener("change", () => rerender());
+els.projectFilter.addEventListener("change", () => rerender());
+els.refresh.addEventListener("click", () => withLoading(els.refresh, () => refresh()).catch((e) => showError(e.message)));
 
 els.toggleCompleted.addEventListener("click", () => {
   showCompleted = !showCompleted;
-  refresh().catch((e) => showError(e.message));
+  rerender();
 });
 
 let searchTimer = null;
 els.search.addEventListener("input", () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => {
-    refresh().catch((e) => showError(e.message));
+    rerender();
   }, 200);
 });
 
