@@ -1,0 +1,102 @@
+name: Run Task (Claude)
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: "Supabase task ID"
+        required: true
+      title:
+        description: "Task title"
+        required: true
+      memo:
+        description: "Task memo / instructions"
+        required: false
+        default: ""
+      type:
+        description: "Task type (research / implement)"
+        required: false
+        default: "implement"
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  run-task:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      TASK_ID: ${{ inputs.task_id }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set status to running
+        run: node .github/scripts/update-status.mjs "$TASK_ID" running
+
+      - name: Build Claude prompt
+        id: prompt
+        run: |
+          MEMO="${{ inputs.memo }}"
+          TITLE="${{ inputs.title }}"
+          TYPE="${{ inputs.type }}"
+
+          if [ "$TYPE" = "research" ]; then
+            PROMPT="以下のタスクについて調査し、詳細なレポートをMarkdown形式で出力してください。"
+          elif [ "$TYPE" = "implement" ]; then
+            PROMPT="以下のタスクを実装してください。ブランチを切り、変更をコミットして、PRを作成するところまで行ってください。"
+          else
+            PROMPT="以下のタスクを実行してください。"
+          fi
+
+          PROMPT="$PROMPT
+
+          # $TITLE"
+
+          if [ -n "$MEMO" ]; then
+            PROMPT="$PROMPT
+
+          $MEMO"
+          fi
+
+          # Write prompt to file to avoid shell escaping issues
+          echo "$PROMPT" > /tmp/claude-prompt.txt
+          echo "prompt_file=/tmp/claude-prompt.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          prompt_file: ${{ steps.prompt.outputs.prompt_file }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          timeout_minutes: 25
+
+      - name: Extract PR URL
+        id: pr
+        if: always()
+        run: |
+          # claude-code-action が PR を作成した場合、出力から URL を抽出
+          RESULT='${{ steps.claude.outputs.result }}'
+          PR_URL=$(echo "$RESULT" | grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' | head -1 || true)
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Finalize task (success)
+        if: success()
+        run: |
+          ARGS=("$TASK_ID" "done")
+          PR_URL="${{ steps.pr.outputs.pr_url }}"
+          if [ -n "$PR_URL" ]; then
+            ARGS+=("--pr-url=$PR_URL")
+          fi
+          ARGS+=("--result=Completed by GitHub Actions")
+          node .github/scripts/finalize-task.mjs "${ARGS[@]}"
+
+      - name: Finalize task (failure)
+        if: failure()
+        run: |
+          node .github/scripts/finalize-task.mjs "$TASK_ID" error --result="GitHub Actions workflow failed"

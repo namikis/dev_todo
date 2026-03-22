@@ -1,0 +1,51 @@
+name: Review Fix (Claude)
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  fix-review:
+    if: github.event.review.state == 'changes_requested'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Build fix prompt
+        id: prompt
+        run: |
+          REVIEW_BODY=$(cat <<'REVIEW_EOF'
+          ${{ github.event.review.body }}
+          REVIEW_EOF
+          )
+
+          cat > /tmp/claude-prompt.txt <<EOF
+          このPRに対してレビューで修正が要求されました。以下のレビューコメントに基づいて修正を行い、コミット・pushしてください。
+
+          ## PR情報
+          - PR: #${{ github.event.pull_request.number }}
+          - タイトル: ${{ github.event.pull_request.title }}
+          - ブランチ: ${{ github.event.pull_request.head.ref }}
+
+          ## レビューコメント
+          ${REVIEW_BODY}
+          EOF
+          echo "prompt_file=/tmp/claude-prompt.txt" >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude to fix
+        uses: anthropics/claude-code-action@v1
+        with:
+          prompt_file: ${{ steps.prompt.outputs.prompt_file }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          timeout_minutes: 25

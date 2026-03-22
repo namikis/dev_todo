@@ -3,7 +3,7 @@
 開発・調査タスクを管理する TODO アプリ。
 Supabase をバックエンドに、GUI / MCP / Vercel デプロイに対応。
 
-**本番URL**: https://dev-todo-namikis-projects-4e343dd6.vercel.app
+**本番URL**: https://dev-todo-three.vercel.app
 
 ## アーキテクチャ
 
@@ -87,6 +87,7 @@ vercel inspect URL --logs  # ビルドログ確認
 |------|------|
 | `SUPABASE_URL` | Supabase プロジェクト URL |
 | `SUPABASE_ANON_KEY` | Supabase Anon Key |
+| `GITHUB_PAT` | GitHub PAT（GitHub Actions トリガー用、任意） |
 
 ## MCP（AI エージェント連携）
 
@@ -152,6 +153,46 @@ npm test              # ユニット + E2E
 npm run test:unit     # ユニットのみ
 npm run test:e2e      # Playwright E2E のみ
 ```
+
+## GitHub Actions（リモートタスク実行）
+
+PCがオフでもスマホからタスクをリクエストし、GitHub Actions 上で Claude が自動実行 → PR作成まで行う仕組み。
+
+### フロー
+
+```
+リクエストボタン → Vercel API (status=requested + workflow_dispatch)
+  → GitHub Actions (run-task.yml) → Claude 実行 → PR作成 → DB更新
+PR レビュー (changes_requested)
+  → GitHub Actions (review-fix.yml) → Claude 修正 → push
+```
+
+### ワークフロー
+
+| ファイル | トリガー | 内容 |
+|---------|---------|------|
+| `.github/workflows/run-task.yml` | `workflow_dispatch` | タスク実行 → PR作成 |
+| `.github/workflows/review-fix.yml` | `pull_request_review` | レビュー修正対応 |
+
+### 必要な Secrets（GitHub リポジトリに設定）
+
+| Secret | 説明 |
+|--------|------|
+| `ANTHROPIC_API_KEY` | Claude API キー |
+| `SUPABASE_URL` | Supabase プロジェクト URL |
+| `SUPABASE_SERVICE_KEY` | Supabase service_role キー |
+
+### 必要な環境変数（Vercel に設定）
+
+| 変数 | 説明 |
+|------|------|
+| `GITHUB_PAT` | GitHub PAT（repo + actions:write スコープ） |
+
+### 二重実行の防止
+
+- GitHub Actions の最初のステップで `status="running"` に更新
+- `agent-runner.js` は `status="requested"` のみ処理
+- Actions が先に running にすれば agent-runner.js は検知しない
 
 ## プロジェクト管理
 
