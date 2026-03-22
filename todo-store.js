@@ -27,10 +27,11 @@ export const TodoSchema = z.object({
   type: z.enum(["research", "implement"]).nullable().optional().default(null),
   project: z.string().nullable().optional().default(null),
   subtasks: z.array(SubtaskSchema).optional().default([]),
-  status: z.enum(["open", "requested", "running", "done", "error"]).default("open"),
+  status: z.enum(["open", "requested", "running", "blocked", "done", "error"]).default("open"),
   result: z.string().nullable().optional().default(null),
   reportUrl: z.string().nullable().optional().default(null),
   prUrl: z.string().nullable().optional().default(null),
+  issueUrl: z.string().nullable().optional().default(null),
   requestedAt: z.string().nullable().optional().default(null),
 });
 
@@ -51,6 +52,7 @@ function fromRow(row) {
     result: row.result ?? null,
     reportUrl: row.report_url ?? null,
     prUrl: row.pr_url ?? null,
+    issueUrl: row.issue_url ?? null,
     requestedAt: row.requested_at ?? null,
   };
 }
@@ -117,6 +119,7 @@ export async function updateTodo(id, updates) {
   if ("assignee" in updates) dbUpdates.assignee = updates.assignee || null;
   if ("type" in updates) dbUpdates.type = updates.type || null;
   if ("project" in updates) dbUpdates.project = updates.project || null;
+  if ("issueUrl" in updates) dbUpdates.issue_url = updates.issueUrl || null;
   if (Object.keys(dbUpdates).length === 0) return await getTodo(id);
   const { data, error } = await supabase.from("todos").update(dbUpdates).eq("id", id).select().single();
   if (error) {

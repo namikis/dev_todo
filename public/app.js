@@ -810,35 +810,16 @@ function renderTodoItem(t, listEl) {
       pill.className = "pill status-pill running";
       pill.textContent = "⚙ 実行中";
       meta.append(pill);
-      if (t.reportUrl) {
-        const link = document.createElement("a");
-        link.className = "pill status-link";
-        link.href = t.reportUrl;
-        link.target = "_blank";
-        link.textContent = "Actions";
-        meta.append(link);
-      }
     } else if (status === "done") {
       const pill = document.createElement("span");
       pill.className = "pill status-pill done";
       pill.textContent = "✓ 完了";
       meta.append(pill);
-      if (t.prUrl) {
-        const link = document.createElement("a");
-        link.className = "pill status-link";
-        link.href = t.prUrl;
-        link.target = "_blank";
-        link.textContent = "PR";
-        meta.append(link);
-      }
-      if (t.reportUrl) {
-        const link = document.createElement("a");
-        link.className = "pill status-link";
-        link.href = t.reportUrl;
-        link.target = "_blank";
-        link.textContent = t.prUrl ? "Actions" : "レポート";
-        meta.append(link);
-      }
+    } else if (status === "blocked") {
+      const pill = document.createElement("span");
+      pill.className = "pill status-pill blocked";
+      pill.textContent = "💬 回答待ち";
+      meta.append(pill);
     } else if (status === "error") {
       const pill = document.createElement("span");
       pill.className = "pill status-pill error";
@@ -853,6 +834,34 @@ function renderTodoItem(t, listEl) {
         link.textContent = "ログ";
         meta.append(link);
       }
+    }
+
+    // Issue link (shown for any status when present)
+    if (t.issueUrl) {
+      const link = document.createElement("a");
+      link.className = "pill status-link issue-link";
+      link.href = t.issueUrl;
+      link.target = "_blank";
+      link.textContent = "Issue";
+      meta.append(link);
+    }
+    // PR link (shown for any status when present)
+    if (t.prUrl) {
+      const link = document.createElement("a");
+      link.className = "pill status-link";
+      link.href = t.prUrl;
+      link.target = "_blank";
+      link.textContent = "PR";
+      meta.append(link);
+    }
+    // Actions link (shown for running/done/error when present, skip if already shown via PR)
+    if (t.reportUrl && !["open", "requested", "blocked"].includes(status)) {
+      const link = document.createElement("a");
+      link.className = "pill status-link";
+      link.href = t.reportUrl;
+      link.target = "_blank";
+      link.textContent = "Actions";
+      meta.append(link);
     }
   }
 

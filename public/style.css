@@ -637,6 +637,22 @@ textarea.detail-input {
   color: var(--danger);
 }
 
+.status-pill.blocked {
+  border-color: color-mix(in srgb, var(--accent-amber) 55%, var(--border));
+  color: var(--accent-amber);
+  background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.issue-link {
+  border-color: color-mix(in srgb, var(--accent-amber) 45%, var(--border));
+  color: var(--accent-amber);
+}
+
+.issue-link:hover {
+  background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
+}
+
 .status-link {
   font-size: 12px;
   padding: 4px 10px;

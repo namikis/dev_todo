@@ -35,10 +35,12 @@ const updates = { status };
 const prUrl = getFlag("pr-url");
 const reportUrl = getFlag("report-url");
 const result = getFlag("result");
+const issueUrl = getFlag("issue-url");
 
 if (prUrl) updates.pr_url = prUrl;
 if (reportUrl) updates.report_url = reportUrl;
 if (result) updates.result = result;
+if (issueUrl) updates.issue_url = issueUrl;
 
 const url = `${SUPABASE_URL}/rest/v1/todos?id=eq.${encodeURIComponent(taskId)}`;
 const res = await fetch(url, {
@@ -61,4 +63,5 @@ if (!res.ok) {
 console.log(`Task ${taskId} finalized: status=${status}` +
   (prUrl ? ` prUrl=${prUrl}` : "") +
   (reportUrl ? ` reportUrl=${reportUrl}` : "") +
+  (issueUrl ? ` issueUrl=${issueUrl}` : "") +
   (result ? ` result=(set)` : ""));

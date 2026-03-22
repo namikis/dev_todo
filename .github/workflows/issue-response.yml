@@ -1,0 +1,214 @@
+name: Resume Task (Issue Response)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  resume-task:
+    # task-question ラベル付き Issue へのコメントのみ対象（bot コメントは除外）
+    if: >-
+      contains(github.event.issue.labels.*.name, 'task-question') &&
+      !github.event.issue.pull_request &&
+      github.event.comment.user.login != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+    steps:
+      - name: Extract task ID from issue title
+        id: extract
+        run: |
+          TITLE="${{ github.event.issue.title }}"
+          TASK_ID=$(echo "$TITLE" | grep -oP '\[Task: \K[^\]]+' || true)
+          if [ -z "$TASK_ID" ]; then
+            echo "No task ID found in issue title: $TITLE"
+            exit 1
+          fi
+          echo "task_id=$TASK_ID" >> "$GITHUB_OUTPUT"
+          echo "Task ID: $TASK_ID"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set status to running
+        run: node .github/scripts/update-status.mjs "${{ steps.extract.outputs.task_id }}" running --report-url="$RUN_URL"
+
+      - name: Fetch task details from DB
+        id: task
+        run: |
+          TASK_ID="${{ steps.extract.outputs.task_id }}"
+          TASK_JSON=$(node -e "
+            const { createClient } = require('@supabase/supabase-js');
+            const s = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY);
+            s.from('todos').select('*').eq('id', '$TASK_ID').single().then(({data,error}) => {
+              if (error) { console.error(error.message); process.exit(1); }
+              console.log(JSON.stringify(data));
+            });
+          ")
+          echo "title=$(echo "$TASK_JSON" | jq -r '.title')" >> "$GITHUB_OUTPUT"
+          echo "memo=$(echo "$TASK_JSON" | jq -r '.memo // empty')" >> "$GITHUB_OUTPUT"
+          echo "type=$(echo "$TASK_JSON" | jq -r '.type // "implement"')" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch full issue conversation
+        id: conversation
+        run: |
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          CONVERSATION=$(gh issue view "$ISSUE_NUMBER" --json title,body,comments \
+            --jq '{title: .title, body: .body, comments: [.comments[] | {author: .author.login, body: .body}]}')
+          echo "conversation<<CONV_EOF" >> "$GITHUB_OUTPUT"
+          echo "$CONVERSATION" >> "$GITHUB_OUTPUT"
+          echo "CONV_EOF" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Build resume prompt
+        id: prompt
+        run: |
+          TASK_ID="${{ steps.extract.outputs.task_id }}"
+          TITLE="${{ steps.task.outputs.title }}"
+          TYPE="${{ steps.task.outputs.type }}"
+          MEMO="${{ steps.task.outputs.memo }}"
+
+          if [ "$TYPE" = "research" ]; then
+            BASE_PROMPT="以下のタスクについて調査し、詳細なレポートをMarkdown形式で出力してください。"
+          elif [ "$TYPE" = "implement" ]; then
+            BASE_PROMPT="以下のタスクを実装してください。ブランチを切り、変更をコミットして、PRを作成するところまで行ってください。
+
+          ## 重要な指示
+          - PRのbodyに「Task: ${TASK_ID}」を必ず含めてください
+          - コミットメッセージは変更内容を簡潔に記述してください"
+          else
+            BASE_PROMPT="以下のタスクを実行してください。"
+          fi
+
+          cat > /tmp/resume-prompt.txt << 'PROMPT_EOF'
+          ${BASE_PROMPT}
+
+          ## 不明点がある場合
+          追加の不明点がある場合は、同じ Issue（#${{ github.event.issue.number }}）にコメントを追加し、作業を中断してください。
+
+          # ${TITLE}
+          PROMPT_EOF
+
+          # メモがあれば追加
+          if [ -n "$MEMO" ]; then
+            echo "" >> /tmp/resume-prompt.txt
+            echo "$MEMO" >> /tmp/resume-prompt.txt
+          fi
+
+          # Issue の会話履歴を追加
+          cat >> /tmp/resume-prompt.txt << 'CONV_EOF'
+
+          ## 事前のディスカッション（GitHub Issue #${{ github.event.issue.number }}）
+          以下はあなたが以前作成した Issue でのやりとりです。ユーザーの最新の回答を踏まえて作業を再開してください。
+
+          ${{ steps.conversation.outputs.conversation }}
+          CONV_EOF
+
+          PROMPT=$(cat /tmp/resume-prompt.txt)
+          echo "prompt<<PROMPT_EOF" >> "$GITHUB_OUTPUT"
+          echo "$PROMPT" >> "$GITHUB_OUTPUT"
+          echo "PROMPT_EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          prompt: ${{ steps.prompt.outputs.prompt }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: "--allowedTools Bash Read Write Edit Glob Grep WebSearch WebFetch"
+
+      - name: Detect still blocked (new comment on Issue)
+        id: blocked
+        if: always() && steps.claude.outcome == 'success'
+        run: |
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          # Issue がまだ open かつ Claude が新しいコメントを追加したか確認
+          ISSUE_STATE=$(gh issue view "$ISSUE_NUMBER" --json state --jq '.state' 2>/dev/null || echo "OPEN")
+          LATEST_AUTHOR=$(gh issue view "$ISSUE_NUMBER" --json comments --jq '.comments[-1].author.login' 2>/dev/null || true)
+          if [ "$ISSUE_STATE" = "OPEN" ] && [ "$LATEST_AUTHOR" = "github-actions[bot]" ]; then
+            echo "is_blocked=true" >> "$GITHUB_OUTPUT"
+            echo "Still blocked: Claude added a new question"
+          else
+            echo "is_blocked=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Finalize task (still blocked)
+        if: always() && steps.blocked.outputs.is_blocked == 'true'
+        run: |
+          node .github/scripts/finalize-task.mjs "${{ steps.extract.outputs.task_id }}" blocked \
+            --report-url="$RUN_URL" \
+            --result="Waiting for additional user response on Issue"
+
+      - name: Close Issue and run tests
+        id: test
+        if: always() && steps.claude.outcome == 'success' && steps.blocked.outputs.is_blocked != 'true'
+        run: |
+          # Issue を close
+          gh issue close "${{ github.event.issue.number }}" 2>/dev/null || true
+
+          # implement の場合テスト実行
+          if [ "${{ steps.task.outputs.type }}" = "implement" ]; then
+            echo "Running non-regression tests..."
+            npm test 2>&1 | tee /tmp/test-output.txt
+          fi
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Extract PR URL
+        id: pr
+        if: always() && steps.claude.outcome == 'success' && steps.blocked.outputs.is_blocked != 'true'
+        run: |
+          PR_URL=$(gh pr list --state open --limit 5 --json url,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[0].url' 2>/dev/null || true)
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Finalize task (success)
+        if: success() && steps.blocked.outputs.is_blocked != 'true' && (steps.test.outcome == 'success' || steps.test.outcome == 'skipped')
+        run: |
+          ARGS=("${{ steps.extract.outputs.task_id }}" "done")
+          PR_URL="${{ steps.pr.outputs.pr_url }}"
+          if [ -n "$PR_URL" ]; then
+            ARGS+=("--pr-url=$PR_URL")
+          fi
+          ARGS+=("--result=Completed by GitHub Actions (resumed from Issue)")
+          ARGS+=("--report-url=$RUN_URL")
+          node .github/scripts/finalize-task.mjs "${ARGS[@]}"
+
+      - name: Finalize task (test failure)
+        if: always() && steps.blocked.outputs.is_blocked != 'true' && steps.test.outcome == 'failure'
+        run: |
+          TEST_OUTPUT=$(tail -20 /tmp/test-output.txt 2>/dev/null || echo "test output unavailable")
+          node .github/scripts/finalize-task.mjs "${{ steps.extract.outputs.task_id }}" error \
+            --result="Tests failed after Claude's changes: $TEST_OUTPUT" \
+            --report-url="$RUN_URL"
+
+      - name: Finalize task (workflow failure)
+        if: failure() && steps.blocked.outputs.is_blocked != 'true' && steps.test.outcome != 'failure'
+        run: |
+          node .github/scripts/finalize-task.mjs "${{ steps.extract.outputs.task_id }}" error \
+            --result="GitHub Actions workflow failed" \
+            --report-url="$RUN_URL"

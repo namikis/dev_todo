@@ -34,8 +34,10 @@ function getFlag(name) {
 const updates = { status };
 const reportUrl = getFlag("report-url");
 const result = getFlag("result");
+const issueUrl = getFlag("issue-url");
 if (reportUrl) updates.report_url = reportUrl;
 if (result) updates.result = result;
+if (issueUrl) updates.issue_url = issueUrl;
 
 const url = `${SUPABASE_URL}/rest/v1/todos?id=eq.${encodeURIComponent(taskId)}`;
 const res = await fetch(url, {

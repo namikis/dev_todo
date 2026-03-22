@@ -45,3 +45,11 @@ create policy "allow all" on reports for all using (true) with check (true);
 -- Migration: project フィールド追加
 -- ============================================================
 alter table todos add column if not exists project text;
+
+-- ============================================================
+-- Migration: issue_url フィールド追加 + blocked ステータス
+-- ============================================================
+alter table todos add column if not exists issue_url text;
+alter table todos drop constraint if exists todos_status_check;
+alter table todos add constraint todos_status_check
+  check (status in ('open', 'requested', 'running', 'blocked', 'done', 'error'));
