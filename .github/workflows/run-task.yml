@@ -54,27 +54,26 @@ jobs:
             PROMPT="以下のタスクを実行してください。"
           fi
 
-          PROMPT="$PROMPT
+          PROMPT="${PROMPT}
 
-          # $TITLE"
+          # ${TITLE}"
 
           if [ -n "$MEMO" ]; then
-            PROMPT="$PROMPT
+            PROMPT="${PROMPT}
 
-          $MEMO"
+          ${MEMO}"
           fi
 
-          # Write prompt to file to avoid shell escaping issues
-          echo "$PROMPT" > /tmp/claude-prompt.txt
-          echo "prompt_file=/tmp/claude-prompt.txt" >> "$GITHUB_OUTPUT"
+          echo "prompt<<PROMPT_EOF" >> "$GITHUB_OUTPUT"
+          echo "$PROMPT" >> "$GITHUB_OUTPUT"
+          echo "PROMPT_EOF" >> "$GITHUB_OUTPUT"
 
       - name: Run Claude
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
-          prompt_file: ${{ steps.prompt.outputs.prompt_file }}
+          prompt: ${{ steps.prompt.outputs.prompt }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          timeout_minutes: 25
 
       - name: Extract PR URL
         id: pr

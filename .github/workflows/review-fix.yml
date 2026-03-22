@@ -25,27 +25,22 @@ jobs:
       - name: Build fix prompt
         id: prompt
         run: |
-          REVIEW_BODY=$(cat <<'REVIEW_EOF'
+          echo "prompt<<PROMPT_EOF" >> "$GITHUB_OUTPUT"
+          echo "このPRに対してレビューで修正が要求されました。以下のレビューコメントに基づいて修正を行い、コミット・pushしてください。" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_OUTPUT"
+          echo "## PR情報" >> "$GITHUB_OUTPUT"
+          echo "- PR: #${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          echo "- タイトル: ${{ github.event.pull_request.title }}" >> "$GITHUB_OUTPUT"
+          echo "- ブランチ: ${{ github.event.pull_request.head.ref }}" >> "$GITHUB_OUTPUT"
+          echo "" >> "$GITHUB_OUTPUT"
+          echo "## レビューコメント" >> "$GITHUB_OUTPUT"
+          cat <<'REVIEW_EOF' >> "$GITHUB_OUTPUT"
           ${{ github.event.review.body }}
           REVIEW_EOF
-          )
-
-          cat > /tmp/claude-prompt.txt <<EOF
-          このPRに対してレビューで修正が要求されました。以下のレビューコメントに基づいて修正を行い、コミット・pushしてください。
-
-          ## PR情報
-          - PR: #${{ github.event.pull_request.number }}
-          - タイトル: ${{ github.event.pull_request.title }}
-          - ブランチ: ${{ github.event.pull_request.head.ref }}
-
-          ## レビューコメント
-          ${REVIEW_BODY}
-          EOF
-          echo "prompt_file=/tmp/claude-prompt.txt" >> "$GITHUB_OUTPUT"
+          echo "PROMPT_EOF" >> "$GITHUB_OUTPUT"
 
       - name: Run Claude to fix
         uses: anthropics/claude-code-action@v1
         with:
-          prompt_file: ${{ steps.prompt.outputs.prompt_file }}
+          prompt: ${{ steps.prompt.outputs.prompt }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          timeout_minutes: 25
