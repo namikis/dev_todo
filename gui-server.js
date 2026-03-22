@@ -135,6 +135,7 @@ async function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname === "/") pathname = "/index.html";
   if (pathname === "/claude") pathname = "/claude.html";
+  if (pathname === "/favicon.svg") pathname = "/favicon-dev.svg";
 
   const candidate = path.normalize(path.join(PUBLIC_DIR, pathname));
   if (!candidate.startsWith(PUBLIC_DIR)) {
