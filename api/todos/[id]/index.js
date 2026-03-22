@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { updateTodo, setCompleted, deleteTodo } from "../../../todo-store.js";
+import { requireAuth } from "../../_lib/auth.js";
 
 const PatchSchema = z.object({
   completed: z.boolean().optional(),
@@ -14,6 +15,10 @@ const PatchSchema = z.object({
 export default async function handler(req, res) {
   try {
     const { id } = req.query;
+    if (req.method === "PATCH" || req.method === "DELETE") {
+      const user = await requireAuth(req, res);
+      if (!user) return;
+    }
     if (req.method === "PATCH") {
       const body = PatchSchema.parse(req.body);
       if ("completed" in body) {

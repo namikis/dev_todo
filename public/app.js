@@ -1,5 +1,76 @@
 const $ = (id) => document.getElementById(id);
 
+// --- Auth ---
+let supabase = null;
+let accessToken = null;
+let isLoggedIn = false;
+
+async function initAuth() {
+  try {
+    const res = await fetch("/api/auth/config");
+    const { supabaseUrl, supabaseAnonKey } = await res.json();
+    if (!supabaseUrl || !supabaseAnonKey) {
+      // テスト環境など、Supabase未設定の場合は全機能有効
+      isLoggedIn = true;
+      updateAuthUI();
+      return;
+    }
+    supabase = window.supabase.createClient(supabaseUrl, supabaseAnonKey);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) {
+      accessToken = session.access_token;
+      isLoggedIn = true;
+    }
+
+    supabase.auth.onAuthStateChange((_event, session) => {
+      accessToken = session?.access_token ?? null;
+      isLoggedIn = !!session;
+      updateAuthUI();
+      refresh().catch(() => {});
+    });
+  } catch {
+    // auth unavailable — read-only mode
+  }
+  updateAuthUI();
+}
+
+function updateAuthUI() {
+  $("authLoading").hidden = true;
+  $("authLoggedOut").hidden = isLoggedIn;
+  $("authLoggedIn").hidden = !isLoggedIn;
+  if (isLoggedIn && supabase) {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) $("userEmail").textContent = user.email;
+    });
+  }
+  // Hide/show write controls
+  const addForm = $("addForm");
+  if (addForm) addForm.style.display = isLoggedIn ? "" : "none";
+}
+
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const email = $("loginEmail").value.trim();
+  const password = $("loginPassword").value;
+  const errEl = $("loginError");
+  errEl.hidden = true;
+  try {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      errEl.textContent = error.message;
+      errEl.hidden = false;
+    }
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
+
+$("logoutBtn").addEventListener("click", async () => {
+  await supabase.auth.signOut();
+});
+
 // --- Markdown renderer ---
 function escHtml(s) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -213,8 +284,10 @@ function showError(message) {
 }
 
 async function api(path, options) {
+  const headers = { "content-type": "application/json" };
+  if (accessToken) headers["authorization"] = `Bearer ${accessToken}`;
   const res = await fetch(path, {
-    headers: { "content-type": "application/json" },
+    headers,
     ...options,
   });
   if (!res.ok) {
@@ -294,6 +367,7 @@ function renderSubtasks(todo, container) {
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = sub.completed;
+    cb.disabled = !isLoggedIn;
     cb.addEventListener("change", async () => {
       try {
         await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks/${encodeURIComponent(sub.id)}`, {
@@ -310,6 +384,7 @@ function renderSubtasks(todo, container) {
     span.className = "subtask-title";
     span.textContent = sub.title;
     span.addEventListener("dblclick", () => {
+      if (!isLoggedIn) return;
       const input = document.createElement("input");
       input.type = "text";
       input.className = "inline-edit";
@@ -342,27 +417,31 @@ function renderSubtasks(todo, container) {
       });
     });
 
-    const del = document.createElement("button");
-    del.className = "button small danger";
-    del.textContent = "×";
-    del.addEventListener("click", async () => {
-      try {
-        await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks/${encodeURIComponent(sub.id)}`, {
-          method: "DELETE",
-        });
-        await refresh();
-      } catch (e) {
-        showError(e.message);
-      }
-    });
-
-    li.append(cb, span, del);
+    if (isLoggedIn) {
+      const del = document.createElement("button");
+      del.className = "button small danger";
+      del.textContent = "×";
+      del.addEventListener("click", async () => {
+        try {
+          await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks/${encodeURIComponent(sub.id)}`, {
+            method: "DELETE",
+          });
+          await refresh();
+        } catch (e) {
+          showError(e.message);
+        }
+      });
+      li.append(cb, span, del);
+    } else {
+      li.append(cb, span);
+    }
     ul.append(li);
   }
 
   container.append(ul);
 
-  // Add subtask form
+  // Add subtask form (only for logged-in users)
+  if (!isLoggedIn) return;
   const addRow = document.createElement("div");
   addRow.className = "subtask-add";
   const input = document.createElement("input");
@@ -414,6 +493,7 @@ function renderDetail(todo, detailEl) {
   dueInput.type = "date";
   dueInput.className = "detail-input";
   dueInput.value = todo.dueDate ?? "";
+  dueInput.disabled = !isLoggedIn;
   dueInput.addEventListener("change", async () => {
     try {
       await api(`/api/todos/${encodeURIComponent(todo.id)}`, {
@@ -425,15 +505,19 @@ function renderDetail(todo, detailEl) {
       showError(e.message);
     }
   });
-  const todayBtn = document.createElement("button");
-  todayBtn.className = "button small today-btn";
-  todayBtn.type = "button";
-  todayBtn.textContent = "今日";
-  todayBtn.addEventListener("click", () => {
-    dueInput.value = new Date().toLocaleDateString("sv-SE");
-    dueInput.dispatchEvent(new Event("change"));
-  });
-  dueRow.append(dueLabel, dueInput, todayBtn);
+  if (isLoggedIn) {
+    const todayBtn = document.createElement("button");
+    todayBtn.className = "button small today-btn";
+    todayBtn.type = "button";
+    todayBtn.textContent = "今日";
+    todayBtn.addEventListener("click", () => {
+      dueInput.value = new Date().toLocaleDateString("sv-SE");
+      dueInput.dispatchEvent(new Event("change"));
+    });
+    dueRow.append(dueLabel, dueInput, todayBtn);
+  } else {
+    dueRow.append(dueLabel, dueInput);
+  }
 
   // Assignee
   const assigneeRow = document.createElement("div");
@@ -450,6 +534,7 @@ function renderDetail(todo, detailEl) {
     if ((todo.assignee ?? "") === val) opt.selected = true;
     assigneeSelect.append(opt);
   }
+  assigneeSelect.disabled = !isLoggedIn;
   assigneeSelect.addEventListener("change", async () => {
     try {
       await api(`/api/todos/${encodeURIComponent(todo.id)}`, {
@@ -473,6 +558,7 @@ function renderDetail(todo, detailEl) {
   memoInput.className = "detail-input";
   memoInput.placeholder = "メモを入力...";
   memoInput.value = todo.memo ?? "";
+  memoInput.disabled = !isLoggedIn;
   let memoTimer = null;
   memoInput.addEventListener("input", () => {
     clearTimeout(memoTimer);
@@ -504,6 +590,7 @@ function renderDetail(todo, detailEl) {
     if ((todo.type ?? "") === val) opt.selected = true;
     typeSelect.append(opt);
   }
+  typeSelect.disabled = !isLoggedIn;
   typeSelect.addEventListener("change", async () => {
     try {
       await api(`/api/todos/${encodeURIComponent(todo.id)}`, {
@@ -528,6 +615,7 @@ function renderDetail(todo, detailEl) {
   projectInput.className = "detail-input";
   projectInput.placeholder = "プロジェクト名";
   projectInput.value = todo.project ?? "";
+  projectInput.disabled = !isLoggedIn;
   projectInput.setAttribute("list", "projectList");
   let projectTimer = null;
   projectInput.addEventListener("input", () => {
@@ -583,6 +671,7 @@ function renderTodoItem(t, listEl) {
   const cb = document.createElement("input");
   cb.type = "checkbox";
   cb.checked = !!t.completed;
+  cb.disabled = !isLoggedIn;
   cb.addEventListener("change", async () => {
     try {
       showError("");
@@ -614,6 +703,7 @@ function renderTodoItem(t, listEl) {
     }, 220);
   });
   title.addEventListener("dblclick", (e) => {
+    if (!isLoggedIn) return;
     e.stopPropagation();
     clearTimeout(clickTimer);
     const input = document.createElement("input");
@@ -661,7 +751,7 @@ function renderTodoItem(t, listEl) {
   // Status indicator
   if (t.assignee === "Claude" && !t.completed) {
     const status = t.status ?? "open";
-    if (status === "open") {
+    if (status === "open" && isLoggedIn) {
       const reqBtn = document.createElement("button");
       reqBtn.className = "button small request-btn";
       reqBtn.textContent = "リクエスト";
@@ -724,21 +814,23 @@ function renderTodoItem(t, listEl) {
     meta.append(subPill);
   }
 
-  const del = document.createElement("button");
-  del.className = "button small danger";
-  del.textContent = "削除";
-  del.addEventListener("click", async () => {
-    if (!confirm("削除しますか？")) return;
-    try {
-      showError("");
-      await api(`/api/todos/${encodeURIComponent(t.id)}`, { method: "DELETE" });
-      openDetails.delete(t.id);
-      await refresh();
-    } catch (e) {
-      showError(e.message);
-    }
-  });
-  meta.append(del);
+  if (isLoggedIn) {
+    const del = document.createElement("button");
+    del.className = "button small danger";
+    del.textContent = "削除";
+    del.addEventListener("click", async () => {
+      if (!confirm("削除しますか？")) return;
+      try {
+        showError("");
+        await api(`/api/todos/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+        openDetails.delete(t.id);
+        await refresh();
+      } catch (e) {
+        showError(e.message);
+      }
+    });
+    meta.append(del);
+  }
 
   const dateEl = document.createElement("div");
   dateEl.className = `todo-date${!t.dueDate ? " unset" : isOverdue(t.dueDate) && !t.completed ? " overdue" : " due"}`;
@@ -912,4 +1004,4 @@ $("docsBtn").addEventListener("click", () => {
   document.body.append(docsOverlay);
 });
 
-refresh().catch((e) => showError(e.message));
+initAuth().then(() => refresh().catch((e) => showError(e.message)));

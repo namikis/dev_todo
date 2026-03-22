@@ -5,6 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import {
   addTodo,
@@ -78,6 +79,16 @@ const SubtaskPatchSchema = z.object({
   title: z.string().min(1).optional(),
 });
 
+async function requireAuth(req, res) {
+  const auth = req.headers.authorization ?? "";
+  const token = auth.replace("Bearer ", "");
+  if (!token) { json(res, 401, { error: "unauthorized" }); return null; }
+  const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) { json(res, 401, { error: "unauthorized" }); return null; }
+  return user;
+}
+
 function json(res, status, body) {
   const data = JSON.stringify(body);
   res.writeHead(status, {
@@ -145,6 +156,14 @@ async function serveStatic(req, res, url) {
 
 async function handleApi(req, res, url) {
   const { pathname, searchParams } = url;
+
+  // GET /api/auth/config — Supabase公開設定
+  if (req.method === "GET" && pathname === "/api/auth/config") {
+    return json(res, 200, {
+      supabaseUrl: process.env.SUPABASE_URL,
+      supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
+    });
+  }
 
   // GET /api/claude/versions — バージョン一覧
   if (req.method === "GET" && pathname === "/api/claude/versions") {
@@ -240,6 +259,8 @@ async function handleApi(req, res, url) {
 
   // POST /api/todos
   if (req.method === "POST" && pathname === "/api/todos") {
+    const user = await requireAuth(req, res);
+    if (!user) return;
     const body = AddSchema.parse(await readJson(req));
     const todo = await addTodo(body.title, {
       dueDate: body.dueDate ?? null,
@@ -253,6 +274,8 @@ async function handleApi(req, res, url) {
 
   // POST /api/todos/clear-completed
   if (req.method === "POST" && pathname === "/api/todos/clear-completed") {
+    const user = await requireAuth(req, res);
+    if (!user) return;
     const body = ClearSchema.parse(await readJson(req));
     if (!body.confirm) return text(res, 400, "confirm required");
     const removed = await clearCompleted();
@@ -267,6 +290,8 @@ async function handleApi(req, res, url) {
 
     // POST /api/todos/:id/subtasks
     if (req.method === "POST" && !subtaskId) {
+      const user = await requireAuth(req, res);
+      if (!user) return;
       const body = SubtaskAddSchema.parse(await readJson(req));
       const result = await addSubtask(todoId, body.title);
       if (!result) return text(res, 404, "todo not found");
@@ -275,6 +300,8 @@ async function handleApi(req, res, url) {
 
     // PATCH /api/todos/:id/subtasks/:subtaskId
     if (req.method === "PATCH" && subtaskId) {
+      const user = await requireAuth(req, res);
+      if (!user) return;
       const body = SubtaskPatchSchema.parse(await readJson(req));
       const result = await updateSubtask(todoId, subtaskId, body);
       if (!result) return text(res, 404, "not found");
@@ -283,6 +310,8 @@ async function handleApi(req, res, url) {
 
     // DELETE /api/todos/:id/subtasks/:subtaskId
     if (req.method === "DELETE" && subtaskId) {
+      const user = await requireAuth(req, res);
+      if (!user) return;
       const todo = await deleteSubtask(todoId, subtaskId);
       if (!todo) return text(res, 404, "not found");
       return json(res, 200, { todo });
@@ -292,6 +321,8 @@ async function handleApi(req, res, url) {
   // POST /api/todos/:id/request
   const reqMatch = pathname.match(/^\/api\/todos\/([^/]+)\/request$/);
   if (reqMatch && req.method === "POST") {
+    const user = await requireAuth(req, res);
+    if (!user) return;
     const id = decodeURIComponent(reqMatch[1]);
     const todo = await requestTodo(id);
     if (!todo) return text(res, 404, "not found");
@@ -301,6 +332,8 @@ async function handleApi(req, res, url) {
   // Single todo routes: /api/todos/:id
   const m = pathname.match(/^\/api\/todos\/([^/]+)$/);
   if (m && req.method === "PATCH") {
+    const user = await requireAuth(req, res);
+    if (!user) return;
     const id = decodeURIComponent(m[1]);
     const body = PatchSchema.parse(await readJson(req));
     if ("completed" in body) {
@@ -320,6 +353,8 @@ async function handleApi(req, res, url) {
     return json(res, 200, { todo });
   }
   if (m && req.method === "DELETE") {
+    const user = await requireAuth(req, res);
+    if (!user) return;
     const id = decodeURIComponent(m[1]);
     const ok = await deleteTodo(id);
     if (!ok) return text(res, 404, "not found");

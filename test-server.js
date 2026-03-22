@@ -93,6 +93,11 @@ const server = createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
 
+    // GET /api/auth/config — テスト用: 空のconfig返却
+    if (method === 'GET' && pathname === '/api/auth/config') {
+      return send(res, 200, { supabaseUrl: null, supabaseAnonKey: null });
+    }
+
     // GET /api/todos
     if (method === 'GET' && pathname === '/api/todos') {
       const status = url.searchParams.get('status') ?? 'all';

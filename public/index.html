@@ -6,13 +6,28 @@
     <title>DEV TODO</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   </head>
   <body>
     <div class="container">
       <header class="header">
         <div>
           <h1>DEV TODO</h1>
-          <p class="muted">開発タスク管理（<code>data/todos.json</code>）</p>
+          <div class="auth-area">
+            <div id="authLoading" class="muted">認証確認中...</div>
+            <div id="authLoggedOut" hidden>
+              <form id="loginForm" class="login-form">
+                <input id="loginEmail" type="email" placeholder="メールアドレス" required class="input" />
+                <input id="loginPassword" type="password" placeholder="パスワード" required class="input" />
+                <button type="submit" class="button primary">ログイン</button>
+              </form>
+              <div id="loginError" class="error" hidden></div>
+            </div>
+            <div id="authLoggedIn" hidden>
+              <span id="userEmail" class="muted"></span>
+              <button id="logoutBtn" class="button small">ログアウト</button>
+            </div>
+          </div>
         </div>
         <div class="header-actions">
           <label class="select">

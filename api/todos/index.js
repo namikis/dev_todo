@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { addTodo, listTodos } from "../../todo-store.js";
+import { requireAuth } from "../_lib/auth.js";
 
 const AddSchema = z.object({
   title: z.string().min(1),
@@ -22,6 +23,8 @@ export default async function handler(req, res) {
       return res.json({ todos });
     }
     if (req.method === "POST") {
+      const user = await requireAuth(req, res);
+      if (!user) return;
       const body = AddSchema.parse(req.body);
       const todo = await addTodo(body.title, {
         dueDate: body.dueDate ?? null,

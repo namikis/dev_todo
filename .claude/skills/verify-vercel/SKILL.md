@@ -1,7 +1,6 @@
 ---
 name: verify-vercel
 description: Vercelデプロイの動作確認・エラー診断を行うスキル。デプロイ状況確認、ビルドログ取得、API疎通テスト、フロントエンド配信確認、エラー原因特定を実施する。「Vercel確認」「デプロイ確認」「Vercel動作確認」「verify vercel」「デプロイ失敗」「Vercelエラー」などの指示で使用。DO NOT TRIGGER when: ローカルサーバーの起動・停止、Vercel以外のホスティング、コードの実装作業の場合。
-allowed-tools: Bash, Read, Glob, Grep
 ---
 
 # Vercel デプロイ動作確認

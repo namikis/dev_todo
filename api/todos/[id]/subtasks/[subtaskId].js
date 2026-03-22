@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { updateSubtask, deleteSubtask } from "../../../../todo-store.js";
+import { requireAuth } from "../../../_lib/auth.js";
 
 const SubtaskPatchSchema = z.object({
   completed: z.boolean().optional(),
@@ -9,6 +10,8 @@ const SubtaskPatchSchema = z.object({
 export default async function handler(req, res) {
   try {
     const { id, subtaskId } = req.query;
+    const user = await requireAuth(req, res);
+    if (!user) return;
     if (req.method === "PATCH") {
       const body = SubtaskPatchSchema.parse(req.body);
       const result = await updateSubtask(id, subtaskId, body);
