@@ -23,6 +23,14 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Build fix prompt
         id: prompt
         run: |
@@ -38,6 +46,9 @@ jobs:
           cat <<'REVIEW_EOF' >> "$GITHUB_OUTPUT"
           ${{ github.event.review.body }}
           REVIEW_EOF
+          echo "" >> "$GITHUB_OUTPUT"
+          echo "## 重要" >> "$GITHUB_OUTPUT"
+          echo "修正後、npm test を実行してテストが通ることを確認してください。" >> "$GITHUB_OUTPUT"
           echo "PROMPT_EOF" >> "$GITHUB_OUTPUT"
 
       - name: Run Claude to fix
@@ -46,3 +57,6 @@ jobs:
           prompt: ${{ steps.prompt.outputs.prompt }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: "--allowedTools Bash Read Write Edit Glob Grep WebSearch WebFetch"
+
+      - name: Run tests (non-regression)
+        run: npm test

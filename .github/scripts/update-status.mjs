@@ -3,15 +3,17 @@
  * 依存ゼロ — Node.js 組み込みの fetch のみ使用。
  *
  * Usage:
- *   node update-status.mjs <task_id> <status>
+ *   node update-status.mjs <task_id> <status> [--report-url=URL] [--result=TEXT]
  *
  * 環境変数: SUPABASE_URL, SUPABASE_SERVICE_KEY
  */
 
-const [taskId, status] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const taskId = args[0];
+const status = args[1];
 
 if (!taskId || !status) {
-  console.error("Usage: node update-status.mjs <task_id> <status>");
+  console.error("Usage: node update-status.mjs <task_id> <status> [--report-url=URL] [--result=TEXT]");
   process.exit(1);
 }
 
@@ -23,6 +25,18 @@ if (!SUPABASE_URL || !SUPABASE_KEY) {
   process.exit(1);
 }
 
+function getFlag(name) {
+  const prefix = `--${name}=`;
+  const arg = args.find((a) => a.startsWith(prefix));
+  return arg ? arg.slice(prefix.length) : null;
+}
+
+const updates = { status };
+const reportUrl = getFlag("report-url");
+const result = getFlag("result");
+if (reportUrl) updates.report_url = reportUrl;
+if (result) updates.result = result;
+
 const url = `${SUPABASE_URL}/rest/v1/todos?id=eq.${encodeURIComponent(taskId)}`;
 const res = await fetch(url, {
   method: "PATCH",
@@ -32,7 +46,7 @@ const res = await fetch(url, {
     "Content-Type": "application/json",
     Prefer: "return=minimal",
   },
-  body: JSON.stringify({ status }),
+  body: JSON.stringify(updates),
 });
 
 if (!res.ok) {

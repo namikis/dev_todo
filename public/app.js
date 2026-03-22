@@ -775,6 +775,14 @@ function renderTodoItem(t, listEl) {
       pill.className = "pill status-pill running";
       pill.textContent = "⚙ 実行中";
       meta.append(pill);
+      if (t.reportUrl) {
+        const link = document.createElement("a");
+        link.className = "pill status-link";
+        link.href = t.reportUrl;
+        link.target = "_blank";
+        link.textContent = "Actions";
+        meta.append(link);
+      }
     } else if (status === "done") {
       const pill = document.createElement("span");
       pill.className = "pill status-pill done";
@@ -793,7 +801,7 @@ function renderTodoItem(t, listEl) {
         link.className = "pill status-link";
         link.href = t.reportUrl;
         link.target = "_blank";
-        link.textContent = "レポート";
+        link.textContent = t.prUrl ? "Actions" : "レポート";
         meta.append(link);
       }
     } else if (status === "error") {
@@ -802,6 +810,14 @@ function renderTodoItem(t, listEl) {
       pill.textContent = "✕ エラー";
       pill.title = t.result ?? "";
       meta.append(pill);
+      if (t.reportUrl) {
+        const link = document.createElement("a");
+        link.className = "pill status-link";
+        link.href = t.reportUrl;
+        link.target = "_blank";
+        link.textContent = "ログ";
+        meta.append(link);
+      }
     }
   }
 
