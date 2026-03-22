@@ -68,6 +68,7 @@ PATCH  /api/todos/:id                      # タスク更新
 DELETE /api/todos/:id                      # タスク削除
 POST   /api/todos/:id/request             # Claude実行リクエスト
 POST   /api/todos/clear-completed         # 完了済み一括削除
+POST   /api/todos/:id/reset-status        # ステータスをopenにリセット
 POST   /api/todos/:id/subtasks            # サブタスク追加
 PATCH  /api/todos/:id/subtasks/:sid       # サブタスク更新
 DELETE /api/todos/:id/subtasks/:sid       # サブタスク削除
@@ -91,15 +92,16 @@ UI「リクエスト」→ POST /api/todos/:id/request
   → run-task.yml 実行開始
     1. npm ci
     2. update-status.mjs → DB: status="running", report_url=Actions URL
-    3. タスクの type に応じたプロンプトを構築（Issue作成の指示を含む）
+    3. タスクの type に応じたプロンプトを構築（Issue作成必須の指示を含む）
     4. anthropics/claude-code-action@v1 で Claude 実行
     5. 品質チェック（permission_denials 検出）
-    6. Issue 作成の検出: task-question ラベル付きIssueを検索
-       - Issue あり → status="blocked", issue_url 保存して終了
-       - Issue なし → 通常フローへ
+    6. Issue 状態チェック:
+       - Issue open → status="blocked", issue_url 保存（質問ありor作業途中）
+       - Issue closed → 通常完了フローへ
+       - Issue なし → status="blocked"（Issue未作成として扱う）
     7. implement の場合: npm test でノンデグ確認
-    8. gh pr list で最新PR URL を取得
-    9. finalize-task.mjs → DB: status="done"/"error", pr_url, report_url, result
+    8. gh pr list --state all で最新PR URL を取得
+    9. finalize-task.mjs → DB: status="done"/"error", pr_url, issue_url, report_url, result
 ```
 
 **入力パラメータ:** `task_id`, `title`, `memo`, `type(research|implement)`
@@ -108,7 +110,7 @@ UI「リクエスト」→ POST /api/todos/:id/request
 - `research`: 調査 → Markdownレポート出力を指示
 - `implement`: 実装 → ブランチ作成・コミット・PR作成を指示。PRのbodyに `Task: <task_id>` を含めるよう指示
 - その他: 汎用実行
-- 全タイプ共通: 不明点がある場合は `gh issue create` で Issue を作成し実装を中断する指示を含む
+- 全タイプ共通: **Issue 作成必須** — 作業開始前に `[Task: <task_id>]` タイトルの Issue を作成し進捗を記録。不明点がある場合は Issue に記載し中断。作業完了時は Issue を close してから終了
 
 **Claude に許可されたツール:** `Bash Read Write Edit Glob Grep WebSearch WebFetch`
 
@@ -127,15 +129,16 @@ UI「リクエスト」→ POST /api/todos/:id/request
     3. Issue の全コメント履歴を取得
     4. 元タスク + 会話履歴を含むプロンプトを構築
     5. Claude 実行
-    6. Claude が追加質問をした場合 → status="blocked" で終了（再びユーザー回答待ち）
-    7. 完了した場合 → Issue を close、テスト実行、status="done"
+    6. Issue 状態チェック:
+       - Issue open → status="blocked" で終了（再びユーザー回答待ち）
+       - Issue closed → テスト実行、status="done"
 ```
 
 **Issue フォーマット（Claude が作成）:**
 ```
-タイトル: [Task: <task_id>] <質問の要約>
+タイトル: [Task: <task_id>] <タスク概要>
 ラベル: task-question
-本文: 質問内容
+本文: 作業方針・計画・質問内容
 ```
 
 #### review-fix.yml — PRレビュー自動修正
@@ -174,19 +177,23 @@ GitHub Actions の代わりにローカルで Claude を直接実行する仕組
 ### タスクステータスの遷移
 
 ```
-open → requested → running → done
+open → requested → running → blocked (Issue open) → (ユーザー回答) → running → ...
+                                                   → (Issue close) → done
                           → error
-                          → blocked → (ユーザー回答) → running → ...
+任意のステータス → open (UIリセットボタン)
 ```
+
+**完了条件:** タスクに紐づく Issue がクローズされて初めて done になる。Issue が open のまま done にはならない。
 
 | 遷移 | トリガー | 更新箇所 |
 |------|---------|---------|
 | open → requested | UI「リクエスト」ボタン / MCP | POST /api/todos/:id/request |
 | requested → running | Actions 開始 / agent-runner | update-status.mjs / agent-runner.js |
-| running → blocked | Claude が Issue を作成 | finalize-task.mjs (issue_url 付与) |
+| running → blocked | Claude 実行後 Issue が open | finalize-task.mjs (issue_url 付与) |
 | blocked → running | ユーザーが Issue にコメント | issue-response.yml → update-status.mjs |
-| running → done | Actions 成功 | finalize-task.mjs (pr_url, report_url 付与) |
+| running → done | Issue closed + テスト成功 | finalize-task.mjs (pr_url, issue_url, report_url 付与) |
 | running → error | Actions 失敗 / テスト失敗 | finalize-task.mjs (result にエラー内容) |
+| 任意 → open | UI リセットボタン | POST /api/todos/:id/reset-status |
 
 ### 必要な Secrets（GitHub Actions）
 

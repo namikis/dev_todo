@@ -610,6 +610,16 @@ textarea.detail-input {
   background: color-mix(in srgb, var(--accent-purple) 25%, transparent);
 }
 
+.reset-btn {
+  background: color-mix(in srgb, var(--muted) 15%, transparent);
+  border-color: color-mix(in srgb, var(--muted) 50%, var(--border));
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+.reset-btn:hover {
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
+}
+
 /* --- Status pills --- */
 .status-pill {
   font-weight: 600;

@@ -171,6 +171,20 @@ export async function requestTodo(id) {
   return fromRow(data);
 }
 
+export async function resetTodoStatus(id) {
+  const { data, error } = await supabase
+    .from("todos")
+    .update({ status: "open", result: null, report_url: null, pr_url: null, issue_url: null, requested_at: null })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) {
+    if (error.code === "PGRST116") return null;
+    throw new Error(error.message);
+  }
+  return fromRow(data);
+}
+
 // --- Subtask operations (stored as jsonb in todos.subtasks) ---
 
 export async function addSubtask(todoId, title) {

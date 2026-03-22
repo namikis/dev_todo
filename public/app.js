@@ -839,6 +839,26 @@ function renderTodoItem(t, listEl) {
       }
     }
 
+    // Reset button for error/blocked/done/requested/running statuses
+    if (status !== "open" && isLoggedIn) {
+      const resetBtn = document.createElement("button");
+      resetBtn.className = "button small reset-btn";
+      resetBtn.textContent = "リセット";
+      resetBtn.title = "ステータスをopenに戻す";
+      resetBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await withLoading(resetBtn, async () => {
+          try {
+            await api(`/api/todos/${encodeURIComponent(t.id)}/reset-status`, { method: "POST" });
+            await refresh();
+          } catch (err) {
+            showError(err.message);
+          }
+        });
+      });
+      meta.append(resetBtn);
+    }
+
     // Issue link (shown for any status when present)
     if (t.issueUrl) {
       const link = document.createElement("a");

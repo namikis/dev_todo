@@ -58,14 +58,21 @@ jobs:
           TASK_ID="${{ inputs.task_id }}"
 
           ISSUE_INSTRUCTION="
-          ## 不明点がある場合
-          実装方針や要件に不明点・確認事項がある場合は、以下の手順で対応してください：
-          1. \`gh issue create\` で Issue を作成する
-             - タイトル: \`[Task: ${TASK_ID}] <質問の要約>\`
-             - ラベル: \`task-question\`（ラベルが存在しない場合は \`gh label create task-question\` で作成してから使用）
-             - 本文に質問内容を明確に記載する
-          2. Issue を作成したら、**それ以上の実装は行わず終了**してください
-          3. ユーザーが Issue にコメントで回答すると、自動的に作業が再開されます"
+          ## Issue による進捗管理（必須）
+          作業を開始する前に、まず以下の手順でタスク用 Issue を作成してください：
+          1. \`gh label create task-question 2>/dev/null || true\` でラベルを確認
+          2. \`gh issue create\` で Issue を作成する
+             - タイトル: \`[Task: ${TASK_ID}] <タスク概要>\`
+             - ラベル: \`task-question\`
+             - 本文に作業方針・計画を記載する
+          3. 作業の進捗や成果物は Issue にコメントとして記録してください
+
+          ## 不明点・確認事項がある場合
+          実装方針や要件に不明点がある場合は、Issue に質問を記載し **それ以上の実装は行わず終了** してください。
+          ユーザーが Issue にコメントで回答すると、自動的に作業が再開されます。
+
+          ## 作業完了時
+          作業が完了したら Issue を close してから終了してください。Issue が open のままだと完了になりません。"
 
           if [ "$TYPE" = "research" ]; then
             PROMPT="以下のタスクについて調査し、詳細なレポートをMarkdown形式で出力してください。
@@ -125,35 +132,49 @@ jobs:
             echo "permission_denials=0" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Detect blocked (Issue created)
-        id: blocked
+      - name: Detect Issue status
+        id: issue_check
         if: always() && steps.claude.outcome == 'success'
         run: |
-          # task-question ラベルのオープン Issue から task_id に一致するものを検索
-          ISSUE_URL=$(gh issue list --label task-question --state open --limit 10 --json url,title \
+          # task-question ラベルの Issue から task_id に一致するものを検索（open/closed 両方）
+          OPEN_ISSUE=$(gh issue list --label task-question --state open --limit 10 --json url,title \
             --jq '.[] | select(.title | contains("[Task: '"$TASK_ID"']")) | .url' 2>/dev/null | head -1 || true)
-          if [ -n "$ISSUE_URL" ]; then
+          CLOSED_ISSUE=$(gh issue list --label task-question --state closed --limit 10 --json url,title \
+            --jq '.[] | select(.title | contains("[Task: '"$TASK_ID"']")) | .url' 2>/dev/null | head -1 || true)
+          ISSUE_URL="${OPEN_ISSUE:-$CLOSED_ISSUE}"
+
+          if [ -n "$OPEN_ISSUE" ]; then
             echo "is_blocked=true" >> "$GITHUB_OUTPUT"
             echo "issue_url=$ISSUE_URL" >> "$GITHUB_OUTPUT"
-            echo "Blocked: Issue found at $ISSUE_URL"
-          else
+            echo "Blocked: Issue still open at $OPEN_ISSUE"
+          elif [ -n "$CLOSED_ISSUE" ]; then
             echo "is_blocked=false" >> "$GITHUB_OUTPUT"
-            echo "Not blocked"
+            echo "issue_url=$ISSUE_URL" >> "$GITHUB_OUTPUT"
+            echo "Issue closed, task can complete: $CLOSED_ISSUE"
+          else
+            echo "is_blocked=true" >> "$GITHUB_OUTPUT"
+            echo "issue_url=" >> "$GITHUB_OUTPUT"
+            echo "Warning: No Issue found for task (Claude may not have created one)"
           fi
         env:
           GH_TOKEN: ${{ github.token }}
 
       - name: Finalize task (blocked)
-        if: always() && steps.blocked.outputs.is_blocked == 'true'
+        if: always() && steps.issue_check.outputs.is_blocked == 'true'
         run: |
-          node .github/scripts/finalize-task.mjs "$TASK_ID" blocked \
-            --issue-url="${{ steps.blocked.outputs.issue_url }}" \
-            --report-url="$RUN_URL" \
-            --result="Waiting for user response on Issue"
+          ISSUE_URL="${{ steps.issue_check.outputs.issue_url }}"
+          ARGS=("$TASK_ID" "blocked" "--report-url=$RUN_URL")
+          if [ -n "$ISSUE_URL" ]; then
+            ARGS+=("--issue-url=$ISSUE_URL")
+            ARGS+=("--result=Waiting for user response on Issue")
+          else
+            ARGS+=("--result=No Issue created - task blocked")
+          fi
+          node .github/scripts/finalize-task.mjs "${ARGS[@]}"
 
       - name: Run tests (non-regression)
         id: test
-        if: always() && steps.claude.outcome == 'success' && steps.blocked.outputs.is_blocked != 'true' && inputs.type == 'implement'
+        if: always() && steps.claude.outcome == 'success' && steps.issue_check.outputs.is_blocked != 'true' && inputs.type == 'implement'
         run: |
           echo "Running non-regression tests..."
           npm test 2>&1 | tee /tmp/test-output.txt
@@ -161,22 +182,26 @@ jobs:
 
       - name: Extract PR URL
         id: pr
-        if: always() && steps.claude.outcome == 'success' && steps.blocked.outputs.is_blocked != 'true'
+        if: always() && steps.claude.outcome == 'success' && steps.issue_check.outputs.is_blocked != 'true'
         run: |
-          PR_URL=$(gh pr list --state open --limit 5 --json url,createdAt \
+          PR_URL=$(gh pr list --state all --limit 10 --json url,createdAt \
             --jq 'sort_by(.createdAt) | reverse | .[0].url' 2>/dev/null || true)
           echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ github.token }}
 
       - name: Finalize task (success)
-        if: success() && steps.blocked.outputs.is_blocked != 'true' && (steps.test.outcome == 'success' || steps.test.outcome == 'skipped')
+        if: success() && steps.issue_check.outputs.is_blocked != 'true' && (steps.test.outcome == 'success' || steps.test.outcome == 'skipped')
         run: |
           ARGS=("$TASK_ID" "done")
           PR_URL="${{ steps.pr.outputs.pr_url }}"
+          ISSUE_URL="${{ steps.issue_check.outputs.issue_url }}"
           DENIALS="${{ steps.quality.outputs.permission_denials }}"
           if [ -n "$PR_URL" ]; then
             ARGS+=("--pr-url=$PR_URL")
+          fi
+          if [ -n "$ISSUE_URL" ]; then
+            ARGS+=("--issue-url=$ISSUE_URL")
           fi
           RESULT_MSG="Completed by GitHub Actions"
           if [ "$DENIALS" -gt 0 ] 2>/dev/null; then
@@ -187,7 +212,7 @@ jobs:
           node .github/scripts/finalize-task.mjs "${ARGS[@]}"
 
       - name: Finalize task (test failure)
-        if: always() && steps.blocked.outputs.is_blocked != 'true' && steps.test.outcome == 'failure'
+        if: always() && steps.issue_check.outputs.is_blocked != 'true' && steps.test.outcome == 'failure'
         run: |
           TEST_OUTPUT=$(tail -20 /tmp/test-output.txt 2>/dev/null || echo "test output unavailable")
           node .github/scripts/finalize-task.mjs "$TASK_ID" error \
@@ -195,7 +220,7 @@ jobs:
             --report-url="$RUN_URL"
 
       - name: Finalize task (workflow failure)
-        if: failure() && steps.blocked.outputs.is_blocked != 'true' && steps.test.outcome != 'failure'
+        if: failure() && steps.issue_check.outputs.is_blocked != 'true' && steps.test.outcome != 'failure'
         run: |
           node .github/scripts/finalize-task.mjs "$TASK_ID" error \
             --result="GitHub Actions workflow failed" \
