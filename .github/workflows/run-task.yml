@@ -81,10 +81,15 @@ jobs:
         id: pr
         if: always()
         run: |
-          # claude-code-action が PR を作成した場合、出力から URL を抽出
-          RESULT='${{ steps.claude.outputs.result }}'
-          PR_URL=$(echo "$RESULT" | grep -oE 'https://github\.com/[^ ]+/pull/[0-9]+' | head -1 || true)
+          # Claude が作成した直近のPRを検索（最新1件）
+          PR_URL=$(gh pr list --author "github-actions[bot]" --state open --json url --jq '.[0].url' 2>/dev/null || true)
+          # bot 名が異なる場合のフォールバック: 直近10分以内のPRを探す
+          if [ -z "$PR_URL" ]; then
+            PR_URL=$(gh pr list --state open --limit 5 --json url,createdAt --jq 'sort_by(.createdAt) | reverse | .[0].url' 2>/dev/null || true)
+          fi
           echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Finalize task (success)
         if: success()
