@@ -792,7 +792,10 @@ function renderTodoItem(t, listEl) {
         e.stopPropagation();
         await withLoading(reqBtn, async () => {
           try {
-            await api(`/api/todos/${encodeURIComponent(t.id)}/request`, { method: "POST" });
+            const result = await api(`/api/todos/${encodeURIComponent(t.id)}/request`, { method: "POST" });
+            if (result.dispatch && !result.dispatch.dispatched) {
+              showError(`Dispatch失敗: ${result.dispatch.reason}`);
+            }
             await refresh();
           } catch (err) {
             showError(err.message);

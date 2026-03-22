@@ -3,7 +3,7 @@ import { requireAuth } from "../../_lib/auth.js";
 
 async function triggerGitHubWorkflow(todo) {
   const pat = process.env.GITHUB_PAT;
-  if (!pat) return; // PAT 未設定の場合はスキップ（agent-runner.js に任せる）
+  if (!pat) return { dispatched: false, reason: "GITHUB_PAT not set" };
 
   const url = "https://api.github.com/repos/namikis/dev_todo/actions/workflows/run-task.yml/dispatches";
   const res = await fetch(url, {
@@ -27,8 +27,9 @@ async function triggerGitHubWorkflow(todo) {
   if (!res.ok) {
     const body = await res.text();
     console.error(`[request] workflow_dispatch failed: ${res.status} ${body}`);
-    // dispatch 失敗してもステータス更新は維持（手動リトライ可能）
+    return { dispatched: false, reason: `GitHub API ${res.status}: ${body}` };
   }
+  return { dispatched: true };
 }
 
 export default async function handler(req, res) {
@@ -40,12 +41,8 @@ export default async function handler(req, res) {
     const todo = await requestTodo(id);
     if (!todo) return res.status(404).end("not found");
 
-    // GitHub Actions workflow をトリガー（非同期、失敗しても応答は返す）
-    triggerGitHubWorkflow(todo).catch((err) => {
-      console.error(`[request] triggerGitHubWorkflow error:`, err.message);
-    });
-
-    res.json({ todo });
+    const dispatch = await triggerGitHubWorkflow(todo);
+    res.json({ todo, dispatch });
   } catch (err) {
     res.status(500).end(err.message);
   }
