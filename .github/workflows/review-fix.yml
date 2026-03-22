@@ -45,3 +45,4 @@ jobs:
         with:
           prompt: ${{ steps.prompt.outputs.prompt }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          allowed_tools: "Bash,Read,Write,Edit,Glob,Grep,WebSearch,WebFetch"
