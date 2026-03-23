@@ -53,3 +53,16 @@ alter table todos add column if not exists issue_url text;
 alter table todos drop constraint if exists todos_status_check;
 alter table todos add constraint todos_status_check
   check (status in ('open', 'requested', 'running', 'blocked', 'done', 'error'));
+
+-- ============================================================
+-- claude_docs テーブル (Claude Code ドキュメントキャッシュ)
+-- ============================================================
+create table if not exists claude_docs (
+  key        text primary key,         -- 'changelog' | 'features' | 'official'
+  content    text not null,
+  version    text,
+  updated_at timestamptz not null default now()
+);
+
+alter table claude_docs enable row level security;
+create policy "allow all" on claude_docs for all using (true) with check (true);

@@ -200,6 +200,39 @@ async function loadDiff() {
 
 $("showDiffBtn").addEventListener("click", loadDiff);
 
+// ---- Update docs ----
+async function updateDocs() {
+  const btn = $("updateBtn");
+  const tsEl = $("updatedAt");
+  btn.disabled = true;
+  btn.textContent = "更新中…";
+  try {
+    const res = await fetch("/api/claude/update", { method: "POST" });
+    if (!res.ok) throw new Error(await res.text());
+    const { version, features, updatedAt } = await res.json();
+
+    // バージョンバッジ更新
+    $("versionBadge").textContent = `v${version}`;
+
+    // 機能カタログを最新内容で差し替え
+    $("featuresContent").innerHTML = renderMarkdown(features);
+
+    // タイムスタンプ表示
+    const d = new Date(updatedAt);
+    tsEl.textContent = `更新: ${d.toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+
+    // バージョン一覧も再読込
+    await loadVersions();
+  } catch (e) {
+    alert(`更新に失敗しました: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "更新";
+  }
+}
+
+$("updateBtn").addEventListener("click", updateDocs);
+
 // ---- Load official docs ----
 let officialDocsLoaded = false;
 async function loadOfficialDocs() {
