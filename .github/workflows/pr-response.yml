@@ -28,8 +28,10 @@ jobs:
         id: extract
         run: |
           PR_NUMBER="${{ github.event.issue.number }}"
-          BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body' 2>/dev/null || true)
-          TASK_ID=$(echo "$BODY" | grep -oP 'Task:\s*\K[0-9a-f-]+' | head -1 || true)
+          echo "PR Number: $PR_NUMBER"
+          BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+          echo "Body length: ${#BODY}"
+          TASK_ID=$(echo "$BODY" | grep -oE 'Task: *[0-9a-f-]+' | head -1 | sed 's/Task: *//' || true)
           if [ -z "$TASK_ID" ]; then
             echo "No Task ID found in PR body, skipping"
             echo "found=false" >> "$GITHUB_OUTPUT"

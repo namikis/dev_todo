@@ -26,7 +26,7 @@ jobs:
           ${{ github.event.pull_request.body }}
           BODY_EOF
           )
-          TASK_ID=$(echo "$BODY" | grep -oP 'Task:\s*\K[0-9a-f-]+' | head -1 || true)
+          TASK_ID=$(echo "$BODY" | grep -oE 'Task: *[0-9a-f-]+' | head -1 | sed 's/Task: *//' || true)
           echo "task_id=$TASK_ID" >> "$GITHUB_OUTPUT"
           echo "Task ID: ${TASK_ID:-none}"
 
