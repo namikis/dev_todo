@@ -831,7 +831,7 @@ function renderTodoItem(t, listEl) {
       meta.append(pill);
       if (t.reportUrl) {
         const link = document.createElement("a");
-        link.className = "pill status-link";
+        link.className = "pill status-link actions-link";
         link.href = t.reportUrl;
         link.target = "_blank";
         link.textContent = "ログ";
@@ -871,7 +871,7 @@ function renderTodoItem(t, listEl) {
     // PR link (shown for any status when present)
     if (t.prUrl) {
       const link = document.createElement("a");
-      link.className = "pill status-link";
+      link.className = "pill status-link pr-link";
       link.href = t.prUrl;
       link.target = "_blank";
       link.textContent = "PR";
@@ -880,7 +880,7 @@ function renderTodoItem(t, listEl) {
     // Actions link (shown for running/done/error when present, skip if already shown via PR)
     if (t.reportUrl && !["open", "requested", "blocked"].includes(status)) {
       const link = document.createElement("a");
-      link.className = "pill status-link";
+      link.className = "pill status-link actions-link";
       link.href = t.reportUrl;
       link.target = "_blank";
       link.textContent = "Actions";

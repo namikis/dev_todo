@@ -663,6 +663,24 @@ textarea.detail-input {
   background: color-mix(in srgb, var(--accent-amber) 10%, transparent);
 }
 
+.pr-link {
+  border-color: color-mix(in srgb, var(--ok) 55%, var(--border));
+  color: var(--ok);
+}
+
+.pr-link:hover {
+  background: color-mix(in srgb, var(--ok) 10%, transparent);
+}
+
+.actions-link {
+  border-color: color-mix(in srgb, var(--accent-purple) 45%, var(--border));
+  color: var(--accent-purple);
+}
+
+.actions-link:hover {
+  background: color-mix(in srgb, var(--accent-purple) 10%, transparent);
+}
+
 .status-link {
   font-size: 12px;
   padding: 4px 10px;
