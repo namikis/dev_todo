@@ -805,6 +805,7 @@ textarea.detail-input {
   display: flex;
   gap: 6px;
   align-items: center;
+  flex-wrap: wrap;
 }
 
 .login-form .input {
@@ -826,4 +827,115 @@ textarea.detail-input {
 #loginError {
   font-size: 0.85rem;
   margin-top: 4px;
+}
+
+/* ===== Mobile responsive ===== */
+@media (max-width: 640px) {
+  .container {
+    padding: 16px 10px 48px;
+  }
+
+  h1 {
+    font-size: 1.3rem;
+  }
+
+  /* Header actions: full width, wrap */
+  .header-actions {
+    width: 100%;
+    gap: 6px;
+  }
+
+  /* Add form: title full-width, other fields wrap */
+  #title {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .date-input {
+    flex: 1;
+    min-width: 120px;
+    width: auto;
+  }
+
+  .assignee-input,
+  .type-input,
+  .project-input {
+    flex: 1;
+    min-width: 80px;
+    width: auto;
+  }
+
+  /* Search input: fill available space */
+  .search-input {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+
+  /* Todo row: 2-row layout on mobile
+     Row 1: [checkbox] [title]
+     Row 2: [meta spanning both columns]
+     Note: DOM order is cb / dateEl / title / meta          */
+  .todo-row {
+    grid-template-columns: 28px 1fr;
+    grid-template-rows: auto auto;
+    row-gap: 6px;
+  }
+
+  /* checkbox → col 1, row 1 */
+  .todo-row > input[type="checkbox"] {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  /* dateEl (2nd child): hide — date shown in meta pills */
+  .todo-date {
+    display: none;
+  }
+
+  /* title (3rd child) → col 2, row 1 */
+  .todo-title {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  /* meta (4th child) → span full width, row 2 */
+  .todo-meta {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    justify-content: flex-start;
+    padding-left: 38px; /* align under title */
+  }
+
+  /* Login form: wrap on small screens */
+  .login-form .input {
+    flex: 1;
+    min-width: 140px;
+    width: auto;
+  }
+
+  /* Detail row: stack label + input vertically */
+  .detail-row {
+    flex-wrap: wrap;
+  }
+
+  .detail-label {
+    width: 100%;
+    min-width: unset;
+  }
+
+  /* Docs modal: full-width padding reduction */
+  .docs-modal-body {
+    padding: 16px 14px;
+  }
+
+  .docs-modal-header {
+    padding: 12px 14px;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .docs-modal-tabs {
+    flex-wrap: wrap;
+  }
 }
