@@ -91,3 +91,15 @@ jobs:
             echo "$RESPONSE"
             exit 1
           fi
+
+      - name: Send notification
+        if: always() && steps.extract.outputs.found == 'true'
+        continue-on-error: true
+        run: |
+          node .github/scripts/notify.mjs "${{ steps.extract.outputs.task_id }}" "done" \
+            --title="${{ github.event.pull_request.title }}" \
+            --pr-url="${{ github.event.pull_request.html_url }}" \
+            --issue-url="${{ steps.close_issue.outputs.issue_url }}"
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}

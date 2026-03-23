@@ -15,8 +15,21 @@ jobs:
     if: github.event.review.state == 'changes_requested'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
     steps:
+      - name: Extract task ID from PR body
+        id: extract
+        run: |
+          BODY=$(cat <<'BODY_EOF'
+          ${{ github.event.pull_request.body }}
+          BODY_EOF
+          )
+          TASK_ID=$(echo "$BODY" | grep -oP 'Task:\s*\K[0-9a-f-]+' | head -1 || true)
+          echo "task_id=$TASK_ID" >> "$GITHUB_OUTPUT"
+          echo "Task ID: ${TASK_ID:-none}"
+
       - name: Checkout PR branch
         uses: actions/checkout@v4
         with:
@@ -52,6 +65,7 @@ jobs:
           echo "PROMPT_EOF" >> "$GITHUB_OUTPUT"
 
       - name: Run Claude to fix
+        id: claude
         uses: anthropics/claude-code-action@v1
         with:
           prompt: ${{ steps.prompt.outputs.prompt }}
@@ -60,3 +74,16 @@ jobs:
 
       - name: Run tests (non-regression)
         run: npm test
+
+      - name: Send notification
+        if: always()
+        continue-on-error: true
+        run: |
+          STATUS=${{ steps.claude.outcome == 'success' && '"review-fixed"' || '"error"' }}
+          node .github/scripts/notify.mjs "${{ steps.extract.outputs.task_id }}" "$STATUS" \
+            --title="${{ github.event.pull_request.title }}" \
+            --pr-url="${{ github.event.pull_request.html_url }}" \
+            --report-url="$RUN_URL"
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}

@@ -1,4 +1,4 @@
-name: Resume Task (Issue Response)
+name: Respond to PR Comment
 
 on:
   issue_comment:
@@ -11,11 +11,10 @@ permissions:
   id-token: write
 
 jobs:
-  resume-task:
-    # task-question ラベル付き Issue へのコメントのみ対象（bot コメントは除外）
+  respond-pr:
+    # PRへのコメントのみ対象（Bot コメントは除外）
     if: >-
-      contains(github.event.issue.labels.*.name, 'task-question') &&
-      !github.event.issue.pull_request &&
+      github.event.issue.pull_request &&
       github.event.sender.type != 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -25,33 +24,57 @@ jobs:
       RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
     steps:
-      - name: Extract task ID from issue title
+      - name: Extract task ID from PR body
         id: extract
         run: |
-          TITLE="${{ github.event.issue.title }}"
-          TASK_ID=$(echo "$TITLE" | grep -oP '\[Task: \K[^\]]+' || true)
+          PR_NUMBER="${{ github.event.issue.number }}"
+          BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body' 2>/dev/null || true)
+          TASK_ID=$(echo "$BODY" | grep -oP 'Task:\s*\K[0-9a-f-]+' | head -1 || true)
           if [ -z "$TASK_ID" ]; then
-            echo "No task ID found in issue title: $TITLE"
-            exit 1
+            echo "No Task ID found in PR body, skipping"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           echo "task_id=$TASK_ID" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "found=true" >> "$GITHUB_OUTPUT"
           echo "Task ID: $TASK_ID"
+        env:
+          GH_TOKEN: ${{ github.token }}
 
-      - name: Checkout
+      - name: Get PR branch info
+        if: steps.extract.outputs.found == 'true'
+        id: pr_info
+        run: |
+          BRANCH=$(gh pr view "${{ steps.extract.outputs.pr_number }}" --json headRefName --jq '.headRefName')
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "PR branch: $BRANCH"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Checkout PR branch
+        if: steps.extract.outputs.found == 'true'
         uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr_info.outputs.branch }}
+          fetch-depth: 0
 
       - name: Setup Node.js
+        if: steps.extract.outputs.found == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
       - name: Install dependencies
+        if: steps.extract.outputs.found == 'true'
         run: npm ci
 
       - name: Set status to running
+        if: steps.extract.outputs.found == 'true'
         run: node .github/scripts/update-status.mjs "${{ steps.extract.outputs.task_id }}" running --report-url="$RUN_URL"
 
       - name: Fetch task details from DB
+        if: steps.extract.outputs.found == 'true'
         id: task
         run: |
           TASK_ID="${{ steps.extract.outputs.task_id }}"
@@ -71,11 +94,12 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "type=$(echo "$TASK_JSON" | jq -r '.type // "implement"')" >> "$GITHUB_OUTPUT"
 
-      - name: Fetch full issue conversation
+      - name: Fetch PR conversation
+        if: steps.extract.outputs.found == 'true'
         id: conversation
         run: |
-          ISSUE_NUMBER="${{ github.event.issue.number }}"
-          CONVERSATION=$(gh issue view "$ISSUE_NUMBER" --json title,body,comments \
+          PR_NUMBER="${{ steps.extract.outputs.pr_number }}"
+          CONVERSATION=$(gh pr view "$PR_NUMBER" --json title,body,comments \
             --jq '{title: .title, body: .body, comments: [.comments[] | {author: .author.login, body: .body}]}')
           echo "conversation<<CONV_EOF" >> "$GITHUB_OUTPUT"
           echo "$CONVERSATION" >> "$GITHUB_OUTPUT"
@@ -83,59 +107,62 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      - name: Build resume prompt
+      - name: Build prompt
+        if: steps.extract.outputs.found == 'true'
         id: prompt
         run: |
           TASK_ID="${{ steps.extract.outputs.task_id }}"
           TITLE="${{ steps.task.outputs.title }}"
           TYPE="${{ steps.task.outputs.type }}"
           MEMO="${{ steps.task.outputs.memo }}"
+          PR_NUMBER="${{ steps.extract.outputs.pr_number }}"
 
           if [ "$TYPE" = "research" ]; then
             BASE_PROMPT="以下のタスクについて調査し、詳細なレポートをMarkdown形式で出力してください。"
           elif [ "$TYPE" = "implement" ]; then
-            BASE_PROMPT="以下のタスクを実装してください。ブランチを切り、変更をコミットして、PRを作成するところまで行ってください。
+            BASE_PROMPT="以下のタスクの実装を続けてください。このPRのブランチ上で作業しています。変更はコミット・pushしてください。
 
           ## 重要な指示
-          - PRのbodyに「Task: ${TASK_ID}」を必ず含めてください
+          - PRのbodyに「Task: ${TASK_ID}」を必ず保持してください
           - コミットメッセージは変更内容を簡潔に記述してください"
           else
             BASE_PROMPT="以下のタスクを実行してください。"
           fi
 
-          cat > /tmp/resume-prompt.txt << 'PROMPT_EOF'
+          cat > /tmp/pr-prompt.txt << 'PROMPT_EOF'
           ${BASE_PROMPT}
 
           ## 不明点がある場合
-          追加の不明点がある場合は、同じ Issue（#${{ github.event.issue.number }}）にコメントを追加し、作業を中断してください。
+          追加の不明点がある場合は、このPR（#${PR_NUMBER}）にコメントを追加し、作業を中断してください。
 
           ## 作業完了時
-          完了したら Issue に完了報告をコメントしてください。**Issue は close しないでください。** PRマージ時に自動クローズされます。
+          完了したらPRにコメントしてください。**PRのbodyに Task: ${TASK_ID} を必ず保持してください。**
 
           # ${TITLE}
           PROMPT_EOF
 
           # メモがあれば追加
           if [ -n "$MEMO" ]; then
-            echo "" >> /tmp/resume-prompt.txt
-            echo "$MEMO" >> /tmp/resume-prompt.txt
+            echo "" >> /tmp/pr-prompt.txt
+            echo "$MEMO" >> /tmp/pr-prompt.txt
           fi
 
-          # Issue の会話履歴を追加
-          cat >> /tmp/resume-prompt.txt << 'CONV_EOF'
+          # PR の会話履歴を追加
+          cat >> /tmp/pr-prompt.txt << 'CONV_EOF'
 
-          ## 事前のディスカッション（GitHub Issue #${{ github.event.issue.number }}）
-          以下はあなたが以前作成した Issue でのやりとりです。ユーザーの最新の回答を踏まえて作業を再開してください。
+          ## PRでのやり取り（#${PR_NUMBER}）
+          以下はPR上でのやり取りです。ユーザーの最新コメントを踏まえて作業を再開してください。
 
           ${{ steps.conversation.outputs.conversation }}
           CONV_EOF
 
-          PROMPT=$(cat /tmp/resume-prompt.txt)
+          PROMPT=$(cat /tmp/pr-prompt.txt)
           echo "prompt<<PROMPT_EOF" >> "$GITHUB_OUTPUT"
           echo "$PROMPT" >> "$GITHUB_OUTPUT"
           echo "PROMPT_EOF" >> "$GITHUB_OUTPUT"
 
       - name: Run Claude
+        if: steps.extract.outputs.found == 'true'
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
@@ -145,59 +172,43 @@ jobs:
 
       - name: Check Issue and PR status
         id: issue_check
-        if: always() && steps.claude.outcome == 'success'
+        if: always() && steps.extract.outputs.found == 'true' && steps.claude.outcome == 'success'
         run: |
           TASK_ID="${{ steps.extract.outputs.task_id }}"
-          ISSUE_NUMBER="${{ github.event.issue.number }}"
-          ISSUE_URL=$(gh issue view "$ISSUE_NUMBER" --json url --jq '.url' 2>/dev/null || true)
+          PR_NUMBER="${{ steps.extract.outputs.pr_number }}"
+          PR_URL=$(gh pr view "$PR_NUMBER" --json url --jq '.url' 2>/dev/null || true)
 
-          # PR を検索（Task: <id> を含む PR）
-          PR_URL=$(gh pr list --state open --limit 10 --json url,body \
-            --jq '.[] | select(.body | test("Task:\\s*'"$TASK_ID"'")) | .url' 2>/dev/null | head -1 || true)
+          # Issue を検索
+          ISSUE_URL=$(gh issue list --label task-question --state open --limit 10 --json url,title \
+            --jq '.[] | select(.title | contains("[Task: '"$TASK_ID"']")) | .url' 2>/dev/null | head -1 || true)
 
           echo "issue_url=$ISSUE_URL" >> "$GITHUB_OUTPUT"
           echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
-
-          if [ -n "$PR_URL" ]; then
-            echo "status=waiting_merge" >> "$GITHUB_OUTPUT"
-            echo "Waiting for PR merge: $PR_URL"
-          else
-            echo "status=blocked" >> "$GITHUB_OUTPUT"
-            echo "Still blocked: no PR yet"
-          fi
+          echo "status=waiting_merge" >> "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ github.token }}
 
       - name: Run tests
         id: test
-        if: always() && steps.claude.outcome == 'success' && steps.issue_check.outputs.status == 'waiting_merge' && steps.task.outputs.type == 'implement'
+        if: always() && steps.extract.outputs.found == 'true' && steps.claude.outcome == 'success' && steps.task.outputs.type == 'implement'
         run: |
           echo "Running non-regression tests..."
           npm test 2>&1 | tee /tmp/test-output.txt
         continue-on-error: true
 
       - name: Finalize task (waiting for PR merge)
-        if: always() && steps.issue_check.outputs.status == 'waiting_merge' && steps.test.outcome != 'failure'
+        if: always() && steps.extract.outputs.found == 'true' && steps.claude.outcome == 'success' && steps.test.outcome != 'failure'
         run: |
           ARGS=("${{ steps.extract.outputs.task_id }}" "running")
           ARGS+=("--report-url=$RUN_URL")
-          ARGS+=("--issue-url=${{ steps.issue_check.outputs.issue_url }}")
           ARGS+=("--pr-url=${{ steps.issue_check.outputs.pr_url }}")
+          [ -n "${{ steps.issue_check.outputs.issue_url }}" ] && ARGS+=("--issue-url=${{ steps.issue_check.outputs.issue_url }}")
           ARGS+=("--result=Waiting for PR merge")
           node .github/scripts/finalize-task.mjs "${ARGS[@]}"
           echo "running" > /tmp/final-status.txt
 
-      - name: Finalize task (still blocked)
-        if: always() && steps.issue_check.outputs.status == 'blocked'
-        run: |
-          node .github/scripts/finalize-task.mjs "${{ steps.extract.outputs.task_id }}" blocked \
-            --issue-url="${{ steps.issue_check.outputs.issue_url }}" \
-            --report-url="$RUN_URL" \
-            --result="Waiting for user response on Issue"
-          echo "blocked" > /tmp/final-status.txt
-
       - name: Finalize task (test failure)
-        if: always() && steps.test.outcome == 'failure'
+        if: always() && steps.extract.outputs.found == 'true' && steps.test.outcome == 'failure'
         run: |
           TEST_OUTPUT=$(tail -20 /tmp/test-output.txt 2>/dev/null || echo "test output unavailable")
           node .github/scripts/finalize-task.mjs "${{ steps.extract.outputs.task_id }}" error \
@@ -206,7 +217,7 @@ jobs:
           echo "error" > /tmp/final-status.txt
 
       - name: Finalize task (workflow failure)
-        if: failure() && steps.claude.outcome != 'success'
+        if: failure() && steps.extract.outputs.found == 'true' && steps.claude.outcome != 'success'
         run: |
           node .github/scripts/finalize-task.mjs "${{ steps.extract.outputs.task_id }}" error \
             --result="GitHub Actions workflow failed" \
@@ -214,14 +225,14 @@ jobs:
           echo "error" > /tmp/final-status.txt
 
       - name: Send notification
-        if: always()
+        if: always() && steps.extract.outputs.found == 'true'
         continue-on-error: true
         run: |
           FINAL_STATUS=$(cat /tmp/final-status.txt 2>/dev/null || echo "unknown")
           node .github/scripts/notify.mjs "${{ steps.extract.outputs.task_id }}" "$FINAL_STATUS" \
             --title="${{ steps.task.outputs.title }}" \
-            --issue-url="${{ steps.issue_check.outputs.issue_url }}" \
             --pr-url="${{ steps.issue_check.outputs.pr_url }}" \
+            --issue-url="${{ steps.issue_check.outputs.issue_url }}" \
             --report-url="$RUN_URL"
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}

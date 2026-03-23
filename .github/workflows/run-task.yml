@@ -182,6 +182,7 @@ jobs:
           ARGS+=("--pr-url=${{ steps.issue_check.outputs.pr_url }}")
           ARGS+=("--result=Waiting for PR merge")
           node .github/scripts/finalize-task.mjs "${ARGS[@]}"
+          echo "running" > /tmp/final-status.txt
 
       - name: Finalize task (blocked)
         if: always() && steps.issue_check.outputs.status == 'blocked'
@@ -193,6 +194,7 @@ jobs:
           fi
           ARGS+=("--result=Waiting for user response on Issue")
           node .github/scripts/finalize-task.mjs "${ARGS[@]}"
+          echo "blocked" > /tmp/final-status.txt
 
       - name: Finalize task (no issue created)
         if: always() && steps.issue_check.outputs.status == 'no_issue'
@@ -200,6 +202,7 @@ jobs:
           node .github/scripts/finalize-task.mjs "$TASK_ID" error \
             --report-url="$RUN_URL" \
             --result="Claude did not create an Issue for this task"
+          echo "error" > /tmp/final-status.txt
 
       - name: Finalize task (test failure)
         if: always() && steps.test.outcome == 'failure'
@@ -208,6 +211,7 @@ jobs:
           node .github/scripts/finalize-task.mjs "$TASK_ID" error \
             --result="Tests failed after Claude's changes: $TEST_OUTPUT" \
             --report-url="$RUN_URL"
+          echo "error" > /tmp/final-status.txt
 
       - name: Finalize task (workflow failure)
         if: failure() && steps.claude.outcome != 'success'
@@ -215,3 +219,18 @@ jobs:
           node .github/scripts/finalize-task.mjs "$TASK_ID" error \
             --result="GitHub Actions workflow failed" \
             --report-url="$RUN_URL"
+          echo "error" > /tmp/final-status.txt
+
+      - name: Send notification
+        if: always()
+        continue-on-error: true
+        run: |
+          FINAL_STATUS=$(cat /tmp/final-status.txt 2>/dev/null || echo "unknown")
+          node .github/scripts/notify.mjs "$TASK_ID" "$FINAL_STATUS" \
+            --title="${{ inputs.title }}" \
+            --issue-url="${{ steps.issue_check.outputs.issue_url }}" \
+            --pr-url="${{ steps.issue_check.outputs.pr_url }}" \
+            --report-url="$RUN_URL"
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL }}
