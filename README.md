@@ -163,6 +163,10 @@ PCがオフでもスマホからタスクをリクエストし、GitHub Actions 
 ```
 リクエストボタン → Vercel API (status=requested + workflow_dispatch)
   → GitHub Actions (run-task.yml) → Claude 実行 → PR作成 → DB更新
+ユーザーが Issue にコメント
+  → GitHub Actions (issue-response.yml) → Claude 再開 → Issue/PR更新
+PR マージ
+  → GitHub Actions (pr-merged.yml) → Issue クローズ → status=done
 PR レビュー (changes_requested)
   → GitHub Actions (review-fix.yml) → Claude 修正 → push
 ```
@@ -171,8 +175,29 @@ PR レビュー (changes_requested)
 
 | ファイル | トリガー | 内容 |
 |---------|---------|------|
-| `.github/workflows/run-task.yml` | `workflow_dispatch` | タスク実行 → PR作成 |
-| `.github/workflows/review-fix.yml` | `pull_request_review` | レビュー修正対応 |
+| `.github/workflows/run-task.yml` | `workflow_dispatch` | タスク実行 → Issue作成 → PR作成 |
+| `.github/workflows/issue-response.yml` | `issue_comment` (created) | Issue コメントで Claude 再開 |
+| `.github/workflows/pr-merged.yml` | `pull_request` (merged) | PR マージ時に Issue クローズ・status=done |
+| `.github/workflows/review-fix.yml` | `pull_request_review` (changes_requested) | レビュー指摘を Claude が自動修正 |
+
+### タスクステータス遷移
+
+```
+open → requested → running → blocked（質問あり/PR未作成）
+                           ↓ ユーザーが Issue にコメント
+                           → running → done（PRマージ時）
+                           → error（Actions失敗）
+任意 → open（UIリセットボタン）
+```
+
+| 遷移 | トリガー |
+|------|---------|
+| open → requested | UI「リクエスト」ボタン |
+| requested → running | run-task.yml 開始 |
+| running → blocked | Claude 実行後 Issue open + PR なし |
+| blocked → running | ユーザーが Issue にコメント |
+| running → done | PR マージ（pr-merged.yml） |
+| running → error | Actions 失敗 / テスト失敗 |
 
 ### 必要な Secrets（GitHub リポジトリに設定）
 
@@ -180,13 +205,13 @@ PR レビュー (changes_requested)
 |--------|------|
 | `ANTHROPIC_API_KEY` | Claude API キー |
 | `SUPABASE_URL` | Supabase プロジェクト URL |
-| `SUPABASE_SERVICE_KEY` | Supabase service_role キー |
+| `SUPABASE_SERVICE_KEY` | Supabase service_role キー（RLS バイパス） |
 
 ### 必要な環境変数（Vercel に設定）
 
 | 変数 | 説明 |
 |------|------|
-| `GITHUB_PAT` | GitHub PAT（repo + actions:write スコープ） |
+| `GITHUB_PAT` | GitHub PAT（`repo` + `workflow` スコープ） |
 
 ### 二重実行の防止
 
