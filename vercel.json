@@ -6,6 +6,7 @@
     { "source": "/api/todos/:id/subtasks/:subtaskId", "destination": "/api/todos/[id]/subtasks/[subtaskId]" },
     { "source": "/api/todos/:id/subtasks", "destination": "/api/todos/[id]/subtasks" },
     { "source": "/api/todos/:id", "destination": "/api/todos/[id]" },
-    { "source": "/api/docs/:name", "destination": "/api/docs/[name]" }
+    { "source": "/api/docs/:name", "destination": "/api/docs/[name]" },
+    { "source": "/api/claude/:name", "destination": "/api/claude/[name]" }
   ]
 }
