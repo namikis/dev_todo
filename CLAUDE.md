@@ -95,13 +95,12 @@ UI「リクエスト」→ POST /api/todos/:id/request
     3. タスクの type に応じたプロンプトを構築（Issue作成必須の指示を含む）
     4. anthropics/claude-code-action@v1 で Claude 実行
     5. 品質チェック（permission_denials 検出）
-    6. Issue 状態チェック:
-       - Issue open → status="blocked", issue_url 保存（質問ありor作業途中）
-       - Issue closed → 通常完了フローへ
-       - Issue なし → status="blocked"（Issue未作成として扱う）
+    6. Issue + PR 状態チェック:
+       - Issue open + PR あり → status="running"（PRマージ待ち）
+       - Issue open + PR なし → status="blocked"（質問ありor作業途中）
+       - Issue なし → status="error"（Issue未作成）
     7. implement の場合: npm test でノンデグ確認
-    8. gh pr list --state all で最新PR URL を取得
-    9. finalize-task.mjs → DB: status="done"/"error", pr_url, issue_url, report_url, result
+    8. finalize-task.mjs → DB: status更新, pr_url, issue_url, report_url, result
 ```
 
 **入力パラメータ:** `task_id`, `title`, `memo`, `type(research|implement)`
@@ -110,7 +109,7 @@ UI「リクエスト」→ POST /api/todos/:id/request
 - `research`: 調査 → Markdownレポート出力を指示
 - `implement`: 実装 → ブランチ作成・コミット・PR作成を指示。PRのbodyに `Task: <task_id>` を含めるよう指示
 - その他: 汎用実行
-- 全タイプ共通: **Issue 作成必須** — 作業開始前に `[Task: <task_id>]` タイトルの Issue を作成し進捗を記録。不明点がある場合は Issue に記載し中断。作業完了時は Issue を close してから終了
+- 全タイプ共通: **Issue 作成必須** — 作業開始前に `[Task: <task_id>]` タイトルの Issue を作成し進捗を記録。不明点がある場合は Issue に記載し中断。**Issue は close しない**（PRマージ時に自動クローズ）
 
 **Claude に許可されたツール:** `Bash Read Write Edit Glob Grep WebSearch WebFetch`
 
@@ -129,9 +128,9 @@ UI「リクエスト」→ POST /api/todos/:id/request
     3. Issue の全コメント履歴を取得
     4. 元タスク + 会話履歴を含むプロンプトを構築
     5. Claude 実行
-    6. Issue 状態チェック:
-       - Issue open → status="blocked" で終了（再びユーザー回答待ち）
-       - Issue closed → テスト実行、status="done"
+    6. Issue + PR 状態チェック:
+       - PR あり → status="running"（PRマージ待ち）
+       - PR なし → status="blocked"（再びユーザー回答待ち）
 ```
 
 **Issue フォーマット（Claude が作成）:**
@@ -139,6 +138,20 @@ UI「リクエスト」→ POST /api/todos/:id/request
 タイトル: [Task: <task_id>] <タスク概要>
 ラベル: task-question
 本文: 作業方針・計画・質問内容
+```
+
+#### pr-merged.yml — PRマージ時のタスク完了処理
+
+PRがマージされたときに、関連する Issue をクローズし、タスクを done にする。
+
+**トリガー:** `pull_request` closed (merged のみ)
+
+**フロー:**
+```
+PRマージ → pr-merged.yml 実行開始
+  1. PR body から Task ID を抽出（Task: <id> パターン）
+  2. task-question ラベルの open Issue からタスクIDに一致するものをクローズ
+  3. Supabase REST API でタスクを done に更新（pr_url, issue_url 付与）
 ```
 
 #### review-fix.yml — PRレビュー自動修正
@@ -177,21 +190,22 @@ GitHub Actions の代わりにローカルで Claude を直接実行する仕組
 ### タスクステータスの遷移
 
 ```
-open → requested → running → blocked (Issue open) → (ユーザー回答) → running → ...
-                                                   → (Issue close) → done
-                          → error
+open → requested → running → blocked (質問あり/PR未作成) → (ユーザー回答) → running → ...
+                           → running (PRマージ待ち) → done (PRマージ時)
+                           → error
 任意のステータス → open (UIリセットボタン)
 ```
 
-**完了条件:** タスクに紐づく Issue がクローズされて初めて done になる。Issue が open のまま done にはならない。
+**完了条件:** タスクに紐づく PR がマージされて初めて done になる。PRマージ時に Issue も自動クローズされる。
 
 | 遷移 | トリガー | 更新箇所 |
 |------|---------|---------|
 | open → requested | UI「リクエスト」ボタン / MCP | POST /api/todos/:id/request |
 | requested → running | Actions 開始 / agent-runner | update-status.mjs / agent-runner.js |
-| running → blocked | Claude 実行後 Issue が open | finalize-task.mjs (issue_url 付与) |
+| running → blocked | Claude 実行後 Issue open + PR なし | finalize-task.mjs (issue_url 付与) |
+| running → running | Claude 実行後 Issue open + PR あり | finalize-task.mjs (pr_url, issue_url 付与、PRマージ待ち) |
 | blocked → running | ユーザーが Issue にコメント | issue-response.yml → update-status.mjs |
-| running → done | Issue closed + テスト成功 | finalize-task.mjs (pr_url, issue_url, report_url 付与) |
+| running → done | PR マージ | pr-merged.yml (Issue 自動クローズ、pr_url 付与) |
 | running → error | Actions 失敗 / テスト失敗 | finalize-task.mjs (result にエラー内容) |
 | 任意 → open | UI リセットボタン | POST /api/todos/:id/reset-status |
 

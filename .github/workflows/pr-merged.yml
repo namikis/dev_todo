@@ -1,0 +1,93 @@
+name: PR Merged (Finalize Task)
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  finalize:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+
+    steps:
+      - name: Extract Task ID from PR body
+        id: extract
+        run: |
+          BODY=$(cat <<'BODY_EOF'
+          ${{ github.event.pull_request.body }}
+          BODY_EOF
+          )
+          TASK_ID=$(echo "$BODY" | grep -oP 'Task:\s*\K[0-9a-f-]+' | head -1 || true)
+          if [ -z "$TASK_ID" ]; then
+            echo "No Task ID found in PR body, skipping"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "task_id=$TASK_ID" >> "$GITHUB_OUTPUT"
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Task ID: $TASK_ID"
+          fi
+
+      - name: Checkout
+        if: steps.extract.outputs.found == 'true'
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        if: steps.extract.outputs.found == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Close associated Issue
+        if: steps.extract.outputs.found == 'true'
+        run: |
+          TASK_ID="${{ steps.extract.outputs.task_id }}"
+          # task-question ラベルの Issue からタスクIDに一致するものを検索
+          ISSUE_NUMBER=$(gh issue list --label task-question --state open --limit 20 --json number,title \
+            --jq '.[] | select(.title | contains("[Task: '"$TASK_ID"']")) | .number' 2>/dev/null | head -1 || true)
+          if [ -n "$ISSUE_NUMBER" ]; then
+            gh issue close "$ISSUE_NUMBER" --comment "PR #${{ github.event.pull_request.number }} がマージされたため自動クローズします。"
+            echo "Closed Issue #$ISSUE_NUMBER"
+            ISSUE_URL=$(gh issue view "$ISSUE_NUMBER" --json url --jq '.url' 2>/dev/null || true)
+            echo "issue_url=$ISSUE_URL" >> "$GITHUB_OUTPUT"
+          else
+            echo "No open Issue found for task $TASK_ID"
+          fi
+        id: close_issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Finalize task as done
+        if: steps.extract.outputs.found == 'true'
+        run: |
+          TASK_ID="${{ steps.extract.outputs.task_id }}"
+          PR_URL="${{ github.event.pull_request.html_url }}"
+          ISSUE_URL="${{ steps.close_issue.outputs.issue_url }}"
+
+          UPDATES='{"status":"done","pr_url":"'"$PR_URL"'","result":"PR merged"'
+          if [ -n "$ISSUE_URL" ]; then
+            UPDATES="$UPDATES"',"issue_url":"'"$ISSUE_URL"'"'
+          fi
+          UPDATES="$UPDATES"'}'
+
+          URL="${SUPABASE_URL}/rest/v1/todos?id=eq.${TASK_ID}"
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH "$URL" \
+            -H "apikey: $SUPABASE_SERVICE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: return=minimal" \
+            -d "$UPDATES")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "Task $TASK_ID finalized as done (PR: $PR_URL)"
+          else
+            echo "Failed to update task: HTTP $HTTP_CODE"
+            echo "$RESPONSE"
+            exit 1
+          fi
