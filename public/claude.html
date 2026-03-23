@@ -217,7 +217,8 @@
         <span class="version-badge" id="versionBadge">読み込み中…</span>
         <nav class="claude-tabs">
           <button class="claude-tab active" data-tab="features">機能カタログ</button>
-          <button class="claude-tab" data-tab="diff">リリース差分</button>
+          <button class="claude-tab" data-tab="releases">リリースノート</button>
+          <button class="claude-tab" data-tab="diff">バージョン差分</button>
           <button class="claude-tab" data-tab="official">公式ドキュメント</button>
         </nav>
       </header>
@@ -230,7 +231,14 @@
           </div>
         </div>
 
-        <!-- リリース差分 -->
+        <!-- リリースノート（日本語） -->
+        <div id="tab-releases" class="tab-panel">
+          <div id="releasesContent" class="md-content">
+            <p class="state-msg">読み込み中…</p>
+          </div>
+        </div>
+
+        <!-- バージョン差分 -->
         <div id="tab-diff" class="tab-panel">
           <div class="diff-controls">
             <div class="diff-version-group">

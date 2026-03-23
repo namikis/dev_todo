@@ -48,6 +48,48 @@ node scripts/fetch-claude-docs.js
    - 改善（`Improved`）→ 既存説明を更新
    - ヘッダーのバージョン番号と日付を更新
 
+### Step 3b: 日本語リリースノートを生成・更新
+
+`docs/claude-code-changelog.md` を読み、直近 **20 件分** のリリースについて日本語要約を生成し `docs/claude-code-releases-ja.md` を**全件上書き**する。
+
+**出力フォーマット（厳守）:**
+
+~~~markdown
+# Claude Code リリースノート（日本語）
+
+> 最終更新: YYYY-MM-DD / 最新バージョン: `vX.X.X`
+>
+> このファイルは `npm run claude:update` 実行時に自動更新されます。
+
+---
+
+## vX.X.X
+
+### 追加
+- （新機能を日本語で簡潔に1行ずつ記述）
+
+### 改善
+- （改善内容を日本語で簡潔に1行ずつ記述）
+
+### 修正
+- （バグ修正を日本語で簡潔に1行ずつ記述）
+
+---
+
+## vX.X.Y
+
+...（以下同様）
+~~~
+
+**変換ルール:**
+- `Added` → `### 追加` セクション
+- `Fixed` → `### 修正` セクション
+- `Improved` / `Updated` / `Simplified` / `Reduced` / `Enhanced` → `### 改善` セクション
+- その他 → `### 変更` セクション
+- 該当エントリが 0 件のセクションは省略する
+- 技術用語（コマンド名・フラグ・ファイル名）はバッククォートで囲んでそのまま残す
+- 各エントリは英語原文の意味を正確に伝える日本語に翻訳する（直訳よりも自然な日本語を優先）
+
 ### Step 4: 結果をユーザーに報告
 
 以下の形式でまとめて報告する：
@@ -60,14 +102,15 @@ node scripts/fetch-claude-docs.js
 - 新バージョン数: N件
 
 ### 主な変更点
-- （新機能・修正・改善を箇条書き）
+- （新機能・修正・改善を箇条書き、日本語で）
 
 ### 更新したファイル
 - docs/claude-code-diff.md（新着差分）
 - docs/claude-code-features.md（直近5バージョン概要）
 - docs/claude-code-current-features.md（機能カタログ）← 新バージョンがあった場合のみ
+- docs/claude-code-releases-ja.md（日本語リリースノート）← 常に更新
 - docs/claude-code-official-docs.md（公式ドキュメント）
 - docs/claude-code-official-diff.md（公式ドキュメント変更分）← 変化があった場合のみ
 ```
 
-差分がなかった場合は「最新バージョン vX.X.X、変更なし」と報告する。
+差分がなかった場合でも `docs/claude-code-releases-ja.md` は更新し、「最新バージョン vX.X.X、変更なし」と報告する。

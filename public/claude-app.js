@@ -215,10 +215,28 @@ async function loadOfficialDocs() {
   }
 }
 
-// 公式ドキュメントタブが選択されたときに遅延ロード
+// ---- Load releases (日本語リリースノート) ----
+let releasesLoaded = false;
+async function loadReleases() {
+  if (releasesLoaded) return;
+  releasesLoaded = true;
+  const el = $("releasesContent");
+  try {
+    const res = await apiFetch("/api/claude/releases-ja");
+    const text = await res.text();
+    el.innerHTML = renderMarkdown(text);
+  } catch (e) {
+    el.innerHTML = `<p class="state-msg">日本語リリースノートが見つかりません。<br><code>npm run claude:update</code> を実行してください。<br><small>${e.message}</small></p>`;
+  }
+}
+
+// 公式ドキュメント・リリースノートタブが選択されたときに遅延ロード
 tabs.forEach((tab) => {
   if (tab.dataset.tab === "official") {
     tab.addEventListener("click", loadOfficialDocs);
+  }
+  if (tab.dataset.tab === "releases") {
+    tab.addEventListener("click", loadReleases);
   }
 });
 
