@@ -29,7 +29,7 @@ jobs:
         run: |
           PR_NUMBER="${{ github.event.issue.number }}"
           echo "PR Number: $PR_NUMBER"
-          BODY=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+          BODY=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json body --jq '.body')
           echo "Body length: ${#BODY}"
           TASK_ID=$(echo "$BODY" | grep -oE 'Task: *[0-9a-f-]+' | head -1 | sed 's/Task: *//' || true)
           if [ -z "$TASK_ID" ]; then
@@ -48,7 +48,7 @@ jobs:
         if: steps.extract.outputs.found == 'true'
         id: pr_info
         run: |
-          BRANCH=$(gh pr view "${{ steps.extract.outputs.pr_number }}" --json headRefName --jq '.headRefName')
+          BRANCH=$(gh pr view "${{ steps.extract.outputs.pr_number }}" --repo "${{ github.repository }}" --json headRefName --jq '.headRefName')
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           echo "PR branch: $BRANCH"
         env:
