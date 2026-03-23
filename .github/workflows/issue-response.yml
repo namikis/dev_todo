@@ -16,7 +16,7 @@ jobs:
     if: >-
       contains(github.event.issue.labels.*.name, 'task-question') &&
       !github.event.issue.pull_request &&
-      github.event.comment.user.login != 'github-actions[bot]'
+      github.event.sender.type != 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -64,7 +64,11 @@ jobs:
             });
           ")
           echo "title=$(echo "$TASK_JSON" | jq -r '.title')" >> "$GITHUB_OUTPUT"
-          echo "memo=$(echo "$TASK_JSON" | jq -r '.memo // empty')" >> "$GITHUB_OUTPUT"
+          {
+            echo "memo<<MEMO_EOF"
+            echo "$TASK_JSON" | jq -r '.memo // empty'
+            echo "MEMO_EOF"
+          } >> "$GITHUB_OUTPUT"
           echo "type=$(echo "$TASK_JSON" | jq -r '.type // "implement"')" >> "$GITHUB_OUTPUT"
 
       - name: Fetch full issue conversation
