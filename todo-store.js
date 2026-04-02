@@ -97,7 +97,7 @@ export async function getTodo(id) {
   return fromRow(data);
 }
 
-export async function listTodos({ status = "all", limit = 50 } = {}) {
+export async function listTodos({ status = "all", limit = 50, project = null } = {}) {
   let query = supabase
     .from("todos")
     .select("*")
@@ -106,9 +106,19 @@ export async function listTodos({ status = "all", limit = 50 } = {}) {
     .limit(limit);
   if (status === "open") query = query.eq("completed", false);
   if (status === "done") query = query.eq("completed", true);
+  if (project) query = query.eq("project", project);
   const { data, error } = await query;
   if (error) throw new Error(error.message);
   return (data ?? []).map(fromRow);
+}
+
+export async function listProjects() {
+  const { data, error } = await supabase
+    .from("projects")
+    .select("*")
+    .order("name", { ascending: true });
+  if (error) throw new Error(error.message);
+  return data ?? [];
 }
 
 export async function updateTodo(id, updates) {

@@ -9,6 +9,7 @@ import {
   formatTodo,
   getTodo,
   listTodos,
+  listProjects,
   setCompleted,
   updateTodo,
   addSubtask,
@@ -59,10 +60,11 @@ server.registerTool(
     inputSchema: {
       status: z.enum(["all", "open", "done"]).default("all").optional(),
       limit: z.number().int().min(1).max(200).default(50).optional(),
+      project: z.string().nullable().optional().describe("プロジェクト名でフィルター"),
     },
   },
-  async ({ status = "all", limit = 50 } = {}) => {
-    const sliced = await listTodos({ status, limit });
+  async ({ status = "all", limit = 50, project = null } = {}) => {
+    const sliced = await listTodos({ status, limit, project });
     if (sliced.length === 0) return textResult("No todos.");
     return textResult(sliced.map(formatTodo).join("\n"));
   }
@@ -215,6 +217,25 @@ server.registerTool(
     const todo = await deleteSubtask(todoId, subtaskId);
     if (!todo) return textResult(`Not found: todoId=${todoId}, subtaskId=${subtaskId}`);
     return textResult(`Subtask deleted.\n${formatTodo(todo)}`);
+  }
+);
+
+// --- List projects ---
+server.registerTool(
+  "todo_project_list",
+  {
+    title: "List Projects",
+    description: "プロジェクト一覧を取得する。リポジトリ紐づき情報も含む。",
+    inputSchema: {},
+  },
+  async () => {
+    const projects = await listProjects();
+    if (projects.length === 0) return textResult("No projects.");
+    const lines = projects.map((p) => {
+      const repo = p.repository ? ` → ${p.repository}` : "";
+      return `- ${p.name}${repo}`;
+    });
+    return textResult(lines.join("\n"));
   }
 );
 

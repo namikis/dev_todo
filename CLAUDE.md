@@ -75,8 +75,9 @@ POST   /api/todos/:id/subtasks            # サブタスク追加
 PATCH  /api/todos/:id/subtasks/:sid       # サブタスク更新
 DELETE /api/todos/:id/subtasks/:sid       # サブタスク削除
 GET    /api/docs/spec|claude|diff         # ドキュメント取得
-GET    /api/projects                      # プロジェクト一覧
-POST   /api/projects                      # プロジェクト追加
+GET    /api/projects                      # プロジェクト一覧（repository含む）
+POST   /api/projects                      # プロジェクト追加（repository対応）
+PATCH  /api/projects/:name                # プロジェクト更新（repository設定）
 DELETE /api/projects/:name                # プロジェクト削除
 ```
 
@@ -86,7 +87,7 @@ DELETE /api/projects/:name                # プロジェクト削除
 
 ### DBスキーマ (projects テーブル)
 
-主要カラム: `name(text, PK)`, `created_at(timestamptz)`
+主要カラム: `name(text, PK)`, `repository(text, nullable, owner/repo形式)`, `created_at(timestamptz)`
 
 ### GitHub Actions ワークフロー
 

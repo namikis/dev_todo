@@ -21,9 +21,11 @@ export default async function handler(req, res) {
       if (!user) return;
       const name = (req.body.name ?? "").trim();
       if (!name) return res.status(400).json({ error: "name is required" });
+      const row = { name };
+      if ("repository" in req.body) row.repository = req.body.repository || null;
       const { data, error } = await supabase
         .from("projects")
-        .upsert({ name }, { onConflict: "name" })
+        .upsert(row, { onConflict: "name" })
         .select()
         .single();
       if (error) throw new Error(error.message);

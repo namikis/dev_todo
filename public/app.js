@@ -276,7 +276,7 @@ const els = {
 const openDetails = new Set();
 let showCompleted = false;
 let cachedTodos = null;
-let cachedProjects = []; // projects table から取得したプロジェクト名一覧
+let cachedProjects = []; // projects table から取得した { name, repository } 配列
 
 // Loading helper: disables button, shows spinner, re-enables on completion
 async function withLoading(btn, fn) {
@@ -323,7 +323,7 @@ async function api(path, options) {
 async function fetchProjects() {
   try {
     const data = await api("/api/projects");
-    cachedProjects = (data.projects ?? []).map((p) => p.name);
+    cachedProjects = (data.projects ?? []).map((p) => ({ name: p.name, repository: p.repository ?? null }));
   } catch {
     cachedProjects = [];
   }
@@ -794,7 +794,8 @@ function renderTodoItem(t, listEl) {
   // Status indicator
   if (t.assignee === "Claude" && !t.completed) {
     const status = t.status ?? "open";
-    if (status === "open" && isLoggedIn) {
+    const projectHasRepo = t.project && cachedProjects.some((p) => p.name === t.project && p.repository);
+    if (status === "open" && isLoggedIn && !projectHasRepo) {
       const reqBtn = document.createElement("button");
       reqBtn.className = "button small request-btn";
       reqBtn.textContent = "リクエスト";
@@ -954,7 +955,8 @@ function render(todos) {
   const projectFilter = els.projectFilter.value;
 
   // Build project list for datalist and filter dropdown (projects table + todos)
-  const projects = [...new Set([...cachedProjects, ...todos.map((t) => t.project).filter(Boolean)])].sort();
+  const projectNames = cachedProjects.map((p) => p.name);
+  const projects = [...new Set([...projectNames, ...todos.map((t) => t.project).filter(Boolean)])].sort();
   els.projectList.innerHTML = "";
   for (const p of projects) {
     const opt = document.createElement("option");
@@ -1160,7 +1162,8 @@ function createProjectsModal() {
     list.innerHTML = "";
     // Merge: projects table + todos のプロジェクト
     const todoProjects = cachedTodos ? [...new Set(cachedTodos.map((t) => t.project).filter(Boolean))] : [];
-    const allProjects = [...new Set([...cachedProjects, ...todoProjects])].sort();
+    const registeredNames = cachedProjects.map((p) => p.name);
+    const allProjects = [...new Set([...registeredNames, ...todoProjects])].sort();
     if (allProjects.length === 0) {
       list.innerHTML = '<li class="muted" style="padding:12px 0;text-align:center">プロジェクトがありません</li>';
       return;
@@ -1168,6 +1171,9 @@ function createProjectsModal() {
     for (const name of allProjects) {
       const li = document.createElement("li");
       li.className = "project-list-item";
+      li.style.flexWrap = "wrap";
+      const topRow = document.createElement("div");
+      topRow.style.cssText = "display:flex;align-items:center;gap:8px;width:100%";
       const span = document.createElement("span");
       span.textContent = name;
       span.style.flex = "1";
@@ -1177,9 +1183,9 @@ function createProjectsModal() {
       countSpan.className = "muted";
       countSpan.style.fontSize = "12px";
       countSpan.textContent = `${count}件`;
-      li.append(span, countSpan);
+      topRow.append(span, countSpan);
       // 削除ボタン（projects テーブルに登録されているもののみ）
-      if (isLoggedIn && cachedProjects.includes(name) && count === 0) {
+      if (isLoggedIn && registeredNames.includes(name) && count === 0) {
         const delBtn = document.createElement("button");
         delBtn.className = "button small danger";
         delBtn.textContent = "削除";
@@ -1194,7 +1200,41 @@ function createProjectsModal() {
             } catch (e) { showError(e.message); }
           });
         });
-        li.append(delBtn);
+        topRow.append(delBtn);
+      }
+      li.append(topRow);
+      // リポジトリ入力欄（projects テーブルに登録されているもののみ）
+      if (registeredNames.includes(name)) {
+        const repoRow = document.createElement("div");
+        repoRow.style.cssText = "display:flex;align-items:center;gap:6px;width:100%;margin-top:4px";
+        const repoLabel = document.createElement("span");
+        repoLabel.className = "muted";
+        repoLabel.style.fontSize = "11px";
+        repoLabel.textContent = "repo:";
+        const repoInput = document.createElement("input");
+        repoInput.className = "input";
+        repoInput.type = "text";
+        repoInput.placeholder = "owner/repo";
+        repoInput.style.cssText = "flex:1;font-size:12px;padding:2px 6px";
+        const proj = cachedProjects.find((p) => p.name === name);
+        repoInput.value = proj?.repository ?? "";
+        repoInput.disabled = !isLoggedIn;
+        let repoTimer = null;
+        repoInput.addEventListener("input", () => {
+          clearTimeout(repoTimer);
+          repoTimer = setTimeout(async () => {
+            try {
+              await api(`/api/projects/${encodeURIComponent(name)}`, {
+                method: "PATCH",
+                body: JSON.stringify({ repository: repoInput.value || null }),
+              });
+              await fetchProjects();
+              rerender();
+            } catch (e) { showError(e.message); }
+          }, 500);
+        });
+        repoRow.append(repoLabel, repoInput);
+        li.append(repoRow);
       }
       list.append(li);
     }

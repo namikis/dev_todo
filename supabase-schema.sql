@@ -77,3 +77,8 @@ create table if not exists projects (
 
 alter table projects enable row level security;
 create policy "allow all" on projects for all using (true) with check (true);
+
+-- ============================================================
+-- Migration: projects テーブルに repository カラム追加
+-- ============================================================
+alter table projects add column if not exists repository text;
