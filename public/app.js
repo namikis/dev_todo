@@ -276,6 +276,7 @@ const els = {
 const openDetails = new Set();
 let showCompleted = false;
 let cachedTodos = null;
+let cachedProjects = []; // projects table から取得したプロジェクト名一覧
 
 // Loading helper: disables button, shows spinner, re-enables on completion
 async function withLoading(btn, fn) {
@@ -317,6 +318,15 @@ async function api(path, options) {
     throw new Error(text || `${res.status} ${res.statusText}`);
   }
   return await res.json();
+}
+
+async function fetchProjects() {
+  try {
+    const data = await api("/api/projects");
+    cachedProjects = (data.projects ?? []).map((p) => p.name);
+  } catch {
+    cachedProjects = [];
+  }
 }
 
 function isOverdue(dateStr) {
@@ -943,8 +953,8 @@ function render(todos) {
 
   const projectFilter = els.projectFilter.value;
 
-  // Build project list for datalist and filter dropdown
-  const projects = [...new Set(todos.map((t) => t.project).filter(Boolean))].sort();
+  // Build project list for datalist and filter dropdown (projects table + todos)
+  const projects = [...new Set([...cachedProjects, ...todos.map((t) => t.project).filter(Boolean)])].sort();
   els.projectList.innerHTML = "";
   for (const p of projects) {
     const opt = document.createElement("option");
@@ -1034,7 +1044,10 @@ async function refresh() {
   els.list.classList.add("loading");
   try {
     const status = els.filter.value;
-    const data = await api(`/api/todos?status=${encodeURIComponent(status)}&limit=200`);
+    const [data] = await Promise.all([
+      api(`/api/todos?status=${encodeURIComponent(status)}&limit=200`),
+      fetchProjects(),
+    ]);
     cachedTodos = data.todos;
     render(cachedTodos);
   } finally {
@@ -1090,6 +1103,129 @@ els.search.addEventListener("input", () => {
   searchTimer = setTimeout(() => {
     rerender();
   }, 200);
+});
+
+// --- Projects modal ---
+let projectsOverlay = null;
+
+function closeProjectsModal() {
+  if (projectsOverlay) { projectsOverlay.remove(); projectsOverlay = null; }
+}
+
+function createProjectsModal() {
+  const overlay = document.createElement("div");
+  overlay.className = "docs-overlay";
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeProjectsModal(); });
+
+  const modal = document.createElement("div");
+  modal.className = "docs-modal";
+  modal.style.maxWidth = "480px";
+
+  const header = document.createElement("div");
+  header.className = "docs-modal-header";
+  const title = document.createElement("span");
+  title.style.cssText = "font-weight:600;font-size:15px;flex:1";
+  title.textContent = "プロジェクト管理";
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "docs-close";
+  closeBtn.innerHTML = "&times;";
+  closeBtn.addEventListener("click", closeProjectsModal);
+  header.append(title, closeBtn);
+
+  const body = document.createElement("div");
+  body.className = "docs-modal-body";
+  body.style.padding = "16px 20px";
+
+  // Add form
+  const form = document.createElement("form");
+  form.className = "row";
+  form.style.cssText = "gap:8px;margin-bottom:16px";
+  const input = document.createElement("input");
+  input.className = "input";
+  input.type = "text";
+  input.placeholder = "新しいプロジェクト名";
+  input.required = true;
+  input.style.flex = "1";
+  const addBtn = document.createElement("button");
+  addBtn.className = "button primary";
+  addBtn.type = "submit";
+  addBtn.textContent = "追加";
+  form.append(input, addBtn);
+  if (!isLoggedIn) { input.disabled = true; addBtn.disabled = true; }
+
+  const list = document.createElement("ul");
+  list.className = "project-list";
+
+  function renderList() {
+    list.innerHTML = "";
+    // Merge: projects table + todos のプロジェクト
+    const todoProjects = cachedTodos ? [...new Set(cachedTodos.map((t) => t.project).filter(Boolean))] : [];
+    const allProjects = [...new Set([...cachedProjects, ...todoProjects])].sort();
+    if (allProjects.length === 0) {
+      list.innerHTML = '<li class="muted" style="padding:12px 0;text-align:center">プロジェクトがありません</li>';
+      return;
+    }
+    for (const name of allProjects) {
+      const li = document.createElement("li");
+      li.className = "project-list-item";
+      const span = document.createElement("span");
+      span.textContent = name;
+      span.style.flex = "1";
+      // タスク数表示
+      const count = cachedTodos ? cachedTodos.filter((t) => t.project === name).length : 0;
+      const countSpan = document.createElement("span");
+      countSpan.className = "muted";
+      countSpan.style.fontSize = "12px";
+      countSpan.textContent = `${count}件`;
+      li.append(span, countSpan);
+      // 削除ボタン（projects テーブルに登録されているもののみ）
+      if (isLoggedIn && cachedProjects.includes(name) && count === 0) {
+        const delBtn = document.createElement("button");
+        delBtn.className = "button small danger";
+        delBtn.textContent = "削除";
+        delBtn.style.marginLeft = "8px";
+        delBtn.addEventListener("click", async () => {
+          await withLoading(delBtn, async () => {
+            try {
+              await api(`/api/projects/${encodeURIComponent(name)}`, { method: "DELETE" });
+              await fetchProjects();
+              renderList();
+              rerender();
+            } catch (e) { showError(e.message); }
+          });
+        });
+        li.append(delBtn);
+      }
+      list.append(li);
+    }
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = input.value.trim();
+    if (!name) return;
+    await withLoading(addBtn, async () => {
+      try {
+        await api("/api/projects", { method: "POST", body: JSON.stringify({ name }) });
+        input.value = "";
+        await fetchProjects();
+        renderList();
+        rerender();
+      } catch (e) { showError(e.message); }
+    });
+  });
+
+  renderList();
+  body.append(form, list);
+  modal.append(header, body);
+  overlay.append(modal);
+  return overlay;
+}
+
+$("projectsBtn").addEventListener("click", () => {
+  if (projectsOverlay) { closeProjectsModal(); return; }
+  projectsOverlay = createProjectsModal();
+  document.body.append(projectsOverlay);
 });
 
 $("docsBtn").addEventListener("click", () => {

@@ -276,6 +276,39 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // GET /api/projects
+  if (req.method === "GET" && pathname === "/api/projects") {
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+    const { data, error } = await supabase.from("projects").select("*").order("name", { ascending: true });
+    if (error) return text(res, 500, error.message);
+    return json(res, 200, { projects: data ?? [] });
+  }
+
+  // POST /api/projects
+  if (req.method === "POST" && pathname === "/api/projects") {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+    const body = await readJson(req);
+    const name = (body.name ?? "").trim();
+    if (!name) return text(res, 400, "name is required");
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+    const { data, error } = await supabase.from("projects").upsert({ name }, { onConflict: "name" }).select().single();
+    if (error) return text(res, 500, error.message);
+    return json(res, 200, { project: data });
+  }
+
+  // DELETE /api/projects/:name
+  const projMatch = pathname.match(/^\/api\/projects\/([^/]+)$/);
+  if (projMatch && req.method === "DELETE") {
+    const user = await requireAuth(req, res);
+    if (!user) return;
+    const name = decodeURIComponent(projMatch[1]);
+    const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+    const { error, count } = await supabase.from("projects").delete({ count: "exact" }).eq("name", name);
+    if (error) return text(res, 500, error.message);
+    return json(res, 200, { deleted: (count ?? 0) > 0 });
+  }
+
   // GET /api/todos
   if (req.method === "GET" && pathname === "/api/todos") {
     const status = searchParams.get("status") ?? "all";

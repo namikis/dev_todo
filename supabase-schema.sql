@@ -66,3 +66,14 @@ create table if not exists claude_docs (
 
 alter table claude_docs enable row level security;
 create policy "allow all" on claude_docs for all using (true) with check (true);
+
+-- ============================================================
+-- Migration: projects テーブル追加
+-- ============================================================
+create table if not exists projects (
+  name       text primary key,
+  created_at timestamptz not null default now()
+);
+
+alter table projects enable row level security;
+create policy "allow all" on projects for all using (true) with check (true);

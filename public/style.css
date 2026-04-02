@@ -700,6 +700,44 @@ textarea.detail-input {
   50% { opacity: 0.5; }
 }
 
+/* --- Projects button --- */
+.projects-btn {
+  background: color-mix(in srgb, var(--accent-green, #22c55e) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-green, #22c55e) 45%, var(--border));
+  color: var(--accent-green, #22c55e);
+  font-size: 13px;
+  padding: 8px 14px;
+}
+.projects-btn:hover {
+  background: color-mix(in srgb, var(--accent-green, #22c55e) 22%, transparent);
+}
+
+/* --- Projects modal list --- */
+.project-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.project-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+.project-list-item:last-child {
+  border-bottom: none;
+}
+.button.danger {
+  background: color-mix(in srgb, var(--accent-red, #ef4444) 12%, transparent);
+  border-color: color-mix(in srgb, var(--accent-red, #ef4444) 45%, var(--border));
+  color: var(--accent-red, #ef4444);
+}
+.button.danger:hover {
+  background: color-mix(in srgb, var(--accent-red, #ef4444) 22%, transparent);
+}
+
 /* --- Docs button --- */
 .docs-btn {
   background: color-mix(in srgb, var(--accent-purple) 12%, transparent);

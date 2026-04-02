@@ -40,6 +40,8 @@ dev_todo/
 │   ├── todos/[id]/index.js  # PATCH/DELETE /api/todos/:id
 │   ├── todos/[id]/request.js # POST /api/todos/:id/request
 │   ├── todos/[id]/subtasks/ # サブタスク CRUD
+│   ├── projects/index.js    # GET/POST /api/projects
+│   ├── projects/[name].js   # DELETE /api/projects/:name
 │   └── docs/                # 仕様書API
 ├── todo-store.js            # Supabase CRUD処理（全APIの共通データ層）
 ├── gui-server.js            # ローカル開発用サーバー (port 5177)
@@ -51,7 +53,7 @@ dev_todo/
 
 ### フロントエンド設計 (public/app.js)
 
-- **状態管理**: グローバル変数 (`cachedTodos`, `openDetails`, `showCompleted`, `isLoggedIn`)
+- **状態管理**: グローバル変数 (`cachedTodos`, `cachedProjects`, `openDetails`, `showCompleted`, `isLoggedIn`)
 - **API通信**: `api(path, options)` 関数で全API呼び出しを統一（Bearer Token自動付与）
 - **ローディング**: `withLoading(btn, fn)` ヘルパーでボタン無効化+スピナー表示
 - **キャッシュ**: `cachedTodos` でローカルキャッシュし、フィルター/検索/詳細開閉は `rerender()` で再取得なし再描画
@@ -73,11 +75,18 @@ POST   /api/todos/:id/subtasks            # サブタスク追加
 PATCH  /api/todos/:id/subtasks/:sid       # サブタスク更新
 DELETE /api/todos/:id/subtasks/:sid       # サブタスク削除
 GET    /api/docs/spec|claude|diff         # ドキュメント取得
+GET    /api/projects                      # プロジェクト一覧
+POST   /api/projects                      # プロジェクト追加
+DELETE /api/projects/:name                # プロジェクト削除
 ```
 
 ### DBスキーマ (todos テーブル)
 
 主要カラム: `id(uuid)`, `title`, `completed`, `due_date`, `memo`, `assignee(Claude|Tairyu)`, `type(research|implement)`, `project`, `subtasks(jsonb)`, `status(open|requested|running|blocked|done|error)`, `result`, `report_url`, `pr_url`, `issue_url`
+
+### DBスキーマ (projects テーブル)
+
+主要カラム: `name(text, PK)`, `created_at(timestamptz)`
 
 ### GitHub Actions ワークフロー
 
