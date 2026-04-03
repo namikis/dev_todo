@@ -278,6 +278,44 @@ let showCompleted = false;
 let cachedTodos = null;
 let cachedProjects = []; // projects table から取得した { name, repository } 配列
 
+// --- Optimistic update helpers ---
+function updateCachedTodo(id, patch) {
+  if (!cachedTodos) return;
+  const idx = cachedTodos.findIndex((t) => t.id === id);
+  if (idx !== -1) { cachedTodos[idx] = { ...cachedTodos[idx], ...patch }; rerender(); }
+}
+function removeCachedTodo(id) {
+  if (!cachedTodos) return;
+  cachedTodos = cachedTodos.filter((t) => t.id !== id);
+  rerender();
+}
+function addCachedTodo(todo) {
+  if (!cachedTodos) return;
+  cachedTodos = [todo, ...cachedTodos];
+  rerender();
+}
+function updateCachedSubtask(todoId, subtaskId, patch) {
+  if (!cachedTodos) return;
+  const todo = cachedTodos.find((t) => t.id === todoId);
+  if (!todo || !todo.subtasks) return;
+  const idx = todo.subtasks.findIndex((s) => s.id === subtaskId);
+  if (idx !== -1) { todo.subtasks[idx] = { ...todo.subtasks[idx], ...patch }; rerender(); }
+}
+function removeCachedSubtask(todoId, subtaskId) {
+  if (!cachedTodos) return;
+  const todo = cachedTodos.find((t) => t.id === todoId);
+  if (!todo) return;
+  todo.subtasks = (todo.subtasks ?? []).filter((s) => s.id !== subtaskId);
+  rerender();
+}
+function addCachedSubtask(todoId, subtask) {
+  if (!cachedTodos) return;
+  const todo = cachedTodos.find((t) => t.id === todoId);
+  if (!todo) return;
+  todo.subtasks = [...(todo.subtasks ?? []), subtask];
+  rerender();
+}
+
 // Loading helper: disables button, shows spinner, re-enables on completion
 async function withLoading(btn, fn) {
   if (!btn) return fn();
@@ -402,15 +440,17 @@ function renderSubtasks(todo, container) {
     cb.disabled = !isLoggedIn;
     cb.addEventListener("change", async () => {
       cb.disabled = true;
+      const prev = sub.completed;
+      updateCachedSubtask(todo.id, sub.id, { completed: cb.checked });
       try {
         await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks/${encodeURIComponent(sub.id)}`, {
           method: "PATCH",
           body: JSON.stringify({ completed: cb.checked }),
         });
-        await refresh();
       } catch (e) {
         showError(e.message);
-        cb.checked = !cb.checked;
+        updateCachedSubtask(todo.id, sub.id, { completed: prev });
+        cb.checked = prev;
       } finally {
         cb.disabled = false;
       }
@@ -434,6 +474,7 @@ function renderSubtasks(todo, container) {
         saved = true;
         const newTitle = input.value.trim();
         if (newTitle && newTitle !== sub.title) {
+          updateCachedSubtask(todo.id, sub.id, { title: newTitle });
           try {
             await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks/${encodeURIComponent(sub.id)}`, {
               method: "PATCH",
@@ -441,9 +482,11 @@ function renderSubtasks(todo, container) {
             });
           } catch (e) {
             showError(e.message);
+            updateCachedSubtask(todo.id, sub.id, { title: sub.title });
           }
+        } else {
+          rerender();
         }
-        await refresh();
       };
       input.addEventListener("blur", save);
       input.addEventListener("keydown", (e) => {
@@ -459,13 +502,14 @@ function renderSubtasks(todo, container) {
       del.textContent = "×";
       del.addEventListener("click", async () => {
         await withLoading(del, async () => {
+          removeCachedSubtask(todo.id, sub.id);
           try {
             await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks/${encodeURIComponent(sub.id)}`, {
               method: "DELETE",
             });
-            await refresh();
           } catch (e) {
             showError(e.message);
+            await refresh();
           }
         });
       });
@@ -495,12 +539,12 @@ function renderSubtasks(todo, container) {
     if (!title) return;
     await withLoading(addBtn, async () => {
       try {
-        await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks`, {
+        const result = await api(`/api/todos/${encodeURIComponent(todo.id)}/subtasks`, {
           method: "POST",
           body: JSON.stringify({ title }),
         });
         input.value = "";
-        await refresh();
+        addCachedSubtask(todo.id, result.subtask ?? { id: crypto.randomUUID(), title, completed: false });
       } catch (e) {
         showError(e.message);
       }
@@ -535,14 +579,17 @@ function renderDetail(todo, detailEl) {
   dueInput.value = todo.dueDate ?? "";
   dueInput.disabled = !isLoggedIn;
   dueInput.addEventListener("change", async () => {
+    const prev = todo.dueDate;
+    updateCachedTodo(todo.id, { dueDate: dueInput.value || null });
     try {
       await api(`/api/todos/${encodeURIComponent(todo.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ dueDate: dueInput.value || null }),
       });
-      await refresh();
     } catch (e) {
       showError(e.message);
+      updateCachedTodo(todo.id, { dueDate: prev });
+      dueInput.value = prev ?? "";
     }
   });
   if (isLoggedIn) {
@@ -576,14 +623,17 @@ function renderDetail(todo, detailEl) {
   }
   assigneeSelect.disabled = !isLoggedIn;
   assigneeSelect.addEventListener("change", async () => {
+    const prev = todo.assignee;
+    updateCachedTodo(todo.id, { assignee: assigneeSelect.value || null });
     try {
       await api(`/api/todos/${encodeURIComponent(todo.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ assignee: assigneeSelect.value || null }),
       });
-      await refresh();
     } catch (e) {
       showError(e.message);
+      updateCachedTodo(todo.id, { assignee: prev });
+      assigneeSelect.value = prev ?? "";
     }
   });
   assigneeRow.append(assigneeLabel, assigneeSelect);
@@ -632,14 +682,17 @@ function renderDetail(todo, detailEl) {
   }
   typeSelect.disabled = !isLoggedIn;
   typeSelect.addEventListener("change", async () => {
+    const prev = todo.type;
+    updateCachedTodo(todo.id, { type: typeSelect.value || null });
     try {
       await api(`/api/todos/${encodeURIComponent(todo.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ type: typeSelect.value || null }),
       });
-      await refresh();
     } catch (e) {
       showError(e.message);
+      updateCachedTodo(todo.id, { type: prev });
+      typeSelect.value = prev ?? "";
     }
   });
   typeRow.append(typeLabel, typeSelect);
@@ -661,14 +714,17 @@ function renderDetail(todo, detailEl) {
   projectInput.addEventListener("input", () => {
     clearTimeout(projectTimer);
     projectTimer = setTimeout(async () => {
+      const prev = todo.project;
+      updateCachedTodo(todo.id, { project: projectInput.value || null });
       try {
         await api(`/api/todos/${encodeURIComponent(todo.id)}`, {
           method: "PATCH",
           body: JSON.stringify({ project: projectInput.value || null }),
         });
-        await refresh();
       } catch (e) {
         showError(e.message);
+        updateCachedTodo(todo.id, { project: prev });
+        projectInput.value = prev ?? "";
       }
     }, 500);
   });
@@ -714,16 +770,18 @@ function renderTodoItem(t, listEl) {
   cb.disabled = !isLoggedIn;
   cb.addEventListener("change", async () => {
     cb.disabled = true;
+    const prev = t.completed;
+    showError("");
+    updateCachedTodo(t.id, { completed: cb.checked });
     try {
-      showError("");
       await api(`/api/todos/${encodeURIComponent(t.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ completed: cb.checked }),
       });
-      await refresh();
     } catch (e) {
       showError(e.message);
-      cb.checked = !cb.checked;
+      updateCachedTodo(t.id, { completed: prev });
+      cb.checked = prev;
     } finally {
       cb.disabled = false;
     }
@@ -743,7 +801,7 @@ function renderTodoItem(t, listEl) {
         openDetails.add(t.id);
       }
       rerender();
-    }, 220);
+    }, 150);
   });
   title.addEventListener("dblclick", (e) => {
     if (!isLoggedIn) return;
@@ -762,6 +820,7 @@ function renderTodoItem(t, listEl) {
       saved = true;
       const newTitle = input.value.trim();
       if (newTitle && newTitle !== t.title) {
+        updateCachedTodo(t.id, { title: newTitle });
         try {
           await api(`/api/todos/${encodeURIComponent(t.id)}`, {
             method: "PATCH",
@@ -769,9 +828,11 @@ function renderTodoItem(t, listEl) {
           });
         } catch (e) {
           showError(e.message);
+          updateCachedTodo(t.id, { title: t.title });
         }
+      } else {
+        rerender();
       }
-      await refresh();
     };
     input.addEventListener("blur", save);
     input.addEventListener("keydown", (ev) => {
@@ -807,7 +868,7 @@ function renderTodoItem(t, listEl) {
             if (result.dispatch && !result.dispatch.dispatched) {
               showError(`Dispatch失敗: ${result.dispatch.reason}`);
             }
-            await refresh();
+            updateCachedTodo(t.id, { status: "requested" });
           } catch (err) {
             showError(err.message);
           }
@@ -861,9 +922,10 @@ function renderTodoItem(t, listEl) {
         await withLoading(resetBtn, async () => {
           try {
             await api(`/api/todos/${encodeURIComponent(t.id)}/reset-status`, { method: "POST" });
-            await refresh();
+            updateCachedTodo(t.id, { status: "open" });
           } catch (err) {
             showError(err.message);
+            await refresh();
           }
         });
       });
@@ -914,16 +976,15 @@ function renderTodoItem(t, listEl) {
     del.textContent = "削除";
     del.addEventListener("click", async () => {
       if (!confirm("削除しますか？")) return;
-      await withLoading(del, async () => {
-        try {
-          showError("");
-          await api(`/api/todos/${encodeURIComponent(t.id)}`, { method: "DELETE" });
-          openDetails.delete(t.id);
-          await refresh();
-        } catch (e) {
-          showError(e.message);
-        }
-      });
+      showError("");
+      openDetails.delete(t.id);
+      removeCachedTodo(t.id);
+      try {
+        await api(`/api/todos/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+      } catch (e) {
+        showError(e.message);
+        await refresh();
+      }
     });
     meta.append(del);
   }
@@ -1069,7 +1130,7 @@ els.addForm.addEventListener("submit", async (e) => {
   await withLoading(submitBtn, async () => {
     try {
       showError("");
-      await api("/api/todos", {
+      const result = await api("/api/todos", {
         method: "POST",
         body: JSON.stringify({ title, dueDate, assignee, type, project }),
       });
@@ -1078,7 +1139,8 @@ els.addForm.addEventListener("submit", async (e) => {
       els.assignee.value = "";
       els.type.value = "";
       els.project.value = "";
-      await refresh();
+      if (result.todo) addCachedTodo(result.todo);
+      else await refresh();
     } catch (err) {
       showError(err.message);
     }
