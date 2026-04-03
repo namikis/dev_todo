@@ -243,6 +243,16 @@ async function handleApi(req, res, url) {
     }
   }
 
+  // GET /api/claude/releases-ja — 日本語リリースノート
+  if (req.method === "GET" && pathname === "/api/claude/releases-ja") {
+    const p = path.join(DOCS_DIR, "claude-code-releases-ja.md");
+    try {
+      return text(res, 200, await readFile(p, "utf8"));
+    } catch {
+      return text(res, 404, "`npm run claude:update` を実行してください。");
+    }
+  }
+
   // GET /api/docs/spec
   if (req.method === "GET" && pathname === "/api/docs/spec") {
     const specPath = path.join(DOCS_DIR, "spec.md");
